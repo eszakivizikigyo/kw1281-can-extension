@@ -46,7 +46,7 @@
                 BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
                 BorderThickness="0,0,1,0">
             <TreeView ItemsSource="{Binding NavigationItems}"
-                      SelectedItem="{Binding SelectedNavigationItem}"
+                      SelectedItem="{Binding SelectedNavigationItem, Mode=TwoWay}"
                       Margin="4">
                 <TreeView.ItemTemplate>
                     <TreeDataTemplate ItemsSource="{Binding Children}">
@@ -58,17 +58,16 @@
 
         <!-- Center: Active view content -->
         <Border Padding="16">
-            <ContentControl Content="{Binding CurrentView}">
-                <ContentControl.ContentTemplate>
-                    <DataTemplate>
-                        <TextBlock Text="Select a function from the navigation panel."
-                                   VerticalAlignment="Center"
-                                   HorizontalAlignment="Center"
-                                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
-                                   FontSize="16" />
-                    </DataTemplate>
-                </ContentControl.ContentTemplate>
-            </ContentControl>
+            <Panel>
+                <TextBlock Text="Select a function from the navigation panel."
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Center"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                           FontSize="16"
+                           IsVisible="{Binding CurrentView, Converter={x:Static ObjectConverters.IsNull}}" />
+                <ContentControl Content="{Binding CurrentView}"
+                                IsVisible="{Binding CurrentView, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            </Panel>
         </Border>
     </DockPanel>
 
