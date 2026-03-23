@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>BitFab.KW1281Test.Ui.Tests</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.*" />
+    <PackageReference Include="MSTest.TestAdapter" Version="4.*" />
+    <PackageReference Include="MSTest.TestFramework" Version="4.*" />
+    <PackageReference Include="coverlet.collector" Version="6.*" />
+    <PackageReference Include="NSubstitute" Version="5.*" />
+    <PackageReference Include="Avalonia.Headless" Version="11.*" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ui\kw1281test.Ui.csproj" />
+    <ProjectReference Include="..\kw1281test.csproj" />
+  </ItemGroup>
+
+</Project>

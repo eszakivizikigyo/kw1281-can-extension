@@ -25,12 +25,15 @@
   <ItemGroup>
     <Compile Remove="GitHub\**" />
     <Compile Remove="Tests\**" />
+    <Compile Remove="Tests.Ui\**" />
     <Compile Remove="Cli\**" />
     <Compile Remove="Ui\**" />
     <EmbeddedResource Remove="GitHub\**" />
     <EmbeddedResource Remove="Tests\**" />
+    <EmbeddedResource Remove="Tests.Ui\**" />
     <None Remove="GitHub\**" />
     <None Remove="Tests\**" />
+    <None Remove="Tests.Ui\**" />
   </ItemGroup>
 
   <ItemGroup>
