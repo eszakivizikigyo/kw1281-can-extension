@@ -1,0 +1,34 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:BitFab.KW1281Test.Ui.ViewModels.KLine"
+             x:Class="BitFab.KW1281Test.Ui.Views.KLine.FaultCodesView"
+             x:DataType="vm:FaultCodesViewModel">
+
+    <DockPanel Margin="16">
+        <TextBlock DockPanel.Dock="Top" Text="Fault Codes" FontSize="20" FontWeight="Bold" Margin="0,0,0,12" />
+
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">
+            <Button Content="Read Fault Codes" Command="{Binding ReadCommand}" Classes="accent" />
+            <Button Content="Clear Fault Codes" Command="{Binding ClearCommand}" />
+            <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" FontStyle="Italic"
+                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+        </StackPanel>
+
+        <DataGrid ItemsSource="{Binding FaultCodes}"
+                  IsReadOnly="True"
+                  AutoGenerateColumns="False"
+                  GridLinesVisibility="Horizontal"
+                  BorderThickness="1"
+                  BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="#" Width="50"
+                                     Binding="{Binding DtcFormatted}" />
+                <DataGridTextColumn Header="DTC" Width="100"
+                                     Binding="{Binding Dtc}" />
+                <DataGridTextColumn Header="Status" Width="*"
+                                     Binding="{Binding StatusText}" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+
+</UserControl>

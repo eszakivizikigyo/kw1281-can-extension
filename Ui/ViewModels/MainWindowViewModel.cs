@@ -1,6 +1,9 @@
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using BitFab.KW1281Test.Ui.Models;
 using BitFab.KW1281Test.Ui.Services;
+using BitFab.KW1281Test.Ui.ViewModels.Can;
+using BitFab.KW1281Test.Ui.ViewModels.KLine;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace BitFab.KW1281Test.Ui.ViewModels;
@@ -9,6 +12,7 @@ public partial class MainWindowViewModel : ViewModelBase
 {
     private readonly ConnectionService _connectionService;
     private readonly UiLogAdapter _logAdapter;
+    private readonly Dictionary<string, ViewModelBase> _viewCache = new();
 
     public ConnectionViewModel Connection { get; }
     public LogViewModel Log { get; }
@@ -40,9 +44,32 @@ public partial class MainWindowViewModel : ViewModelBase
         if (value?.Tag == null)
             return;
 
-        // Navigation will be handled when we add more views
-        // For now this is a placeholder
+        if (!_viewCache.TryGetValue(value.Tag, out var vm))
+        {
+            vm = CreateViewModel(value.Tag);
+            if (vm != null)
+                _viewCache[value.Tag] = vm;
+        }
+
+        CurrentView = vm;
     }
+
+    private ViewModelBase? CreateViewModel(string tag) => tag switch
+    {
+        "KLine.FaultCodes"  => new FaultCodesViewModel(_connectionService),
+        "KLine.GroupRead"   => new GroupReadViewModel(_connectionService),
+        "KLine.Adaptation"  => new AdaptationViewModel(_connectionService),
+        "KLine.ActuatorTest"=> new ActuatorTestViewModel(_connectionService),
+        "KLine.Coding"      => new CodingViewModel(_connectionService),
+        "KLine.Eeprom"      => new EepromViewModel(_connectionService),
+        "KLine.Memory"      => new MemoryViewModel(_connectionService),
+        "KLine.Cluster"     => new ClusterViewModel(_connectionService),
+        "Can.Monitor"       => new CanMonitorViewModel(_connectionService),
+        "Can.AutoScan"      => new CanAutoScanViewModel(_connectionService),
+        "Can.Diag"          => new CanDiagViewModel(_connectionService),
+        "Can.MultiEcu"      => new CanMultiEcuViewModel(_connectionService),
+        _ => null,
+    };
 
     private static ObservableCollection<NavigationItem> BuildNavigationTree()
     {

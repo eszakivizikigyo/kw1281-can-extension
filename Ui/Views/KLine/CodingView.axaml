@@ -1,0 +1,32 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:BitFab.KW1281Test.Ui.ViewModels.KLine"
+             x:Class="BitFab.KW1281Test.Ui.Views.KLine.CodingView"
+             x:DataType="vm:CodingViewModel">
+
+    <DockPanel Margin="16">
+        <TextBlock DockPanel.Dock="Top" Text="Software Coding" FontSize="20" FontWeight="Bold" Margin="0,0,0,12" />
+
+        <StackPanel DockPanel.Dock="Top" Spacing="8" MaxWidth="500" HorizontalAlignment="Left">
+            <Button Content="Read Identification" Command="{Binding ReadIdentCommand}" Margin="0,0,0,8" />
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="Coding:" VerticalAlignment="Center" Width="100" />
+                <NumericUpDown Value="{Binding SoftwareCoding}" Minimum="0" Maximum="32767"
+                               FormatString="0" MinWidth="120" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="Workshop:" VerticalAlignment="Center" Width="100" />
+                <NumericUpDown Value="{Binding WorkshopCode}" Minimum="0" Maximum="99999"
+                               FormatString="0" MinWidth="120" />
+            </StackPanel>
+
+            <Button Content="Set Coding" Command="{Binding SetCodingCommand}" Classes="accent" Margin="0,8,0,0" />
+
+            <TextBlock Text="{Binding StatusText}" FontStyle="Italic"
+                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+        </StackPanel>
+    </DockPanel>
+
+</UserControl>

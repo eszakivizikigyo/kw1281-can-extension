@@ -1,0 +1,25 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:BitFab.KW1281Test.Ui.ViewModels.KLine"
+             x:Class="BitFab.KW1281Test.Ui.Views.KLine.GroupReadView"
+             x:DataType="vm:GroupReadViewModel">
+
+    <DockPanel Margin="16">
+        <TextBlock DockPanel.Dock="Top" Text="Measuring Groups" FontSize="20" FontWeight="Bold" Margin="0,0,0,12" />
+
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">
+            <TextBlock Text="Group:" VerticalAlignment="Center" />
+            <NumericUpDown Value="{Binding GroupNumber}" Minimum="0" Maximum="255"
+                           FormatString="0" MinWidth="80" />
+            <Button Content="Read" Command="{Binding ReadCommand}" Classes="accent" />
+            <Button Content="Basic Setting" Command="{Binding BasicSettingCommand}" />
+            <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" FontStyle="Italic"
+                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+        </StackPanel>
+
+        <TextBlock Text="Results appear in the Communication Log below."
+                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                   VerticalAlignment="Center" HorizontalAlignment="Center" />
+    </DockPanel>
+
+</UserControl>

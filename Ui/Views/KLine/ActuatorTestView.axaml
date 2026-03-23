@@ -1,0 +1,25 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:BitFab.KW1281Test.Ui.ViewModels.KLine"
+             x:Class="BitFab.KW1281Test.Ui.Views.KLine.ActuatorTestView"
+             x:DataType="vm:ActuatorTestViewModel">
+
+    <DockPanel Margin="16">
+        <TextBlock DockPanel.Dock="Top" Text="Actuator Tests" FontSize="20" FontWeight="Bold" Margin="0,0,0,12" />
+
+        <StackPanel DockPanel.Dock="Top" Spacing="8" MaxWidth="500" HorizontalAlignment="Left">
+            <Button Content="Start Actuator Test" Command="{Binding StartCommand}" Classes="accent" />
+
+            <TextBlock Text="{Binding CurrentTest}" FontSize="16" Margin="0,8,0,0" />
+
+            <TextBlock Text="{Binding StatusText}" FontStyle="Italic"
+                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+
+            <TextBlock Text="Note: Actuator tests cycle through all available tests. Results appear in the Communication Log."
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                       Margin="0,12,0,0" />
+        </StackPanel>
+    </DockPanel>
+
+</UserControl>

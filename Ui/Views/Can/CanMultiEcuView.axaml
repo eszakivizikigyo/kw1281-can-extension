@@ -1,0 +1,44 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:BitFab.KW1281Test.Ui.ViewModels.Can"
+             x:Class="BitFab.KW1281Test.Ui.Views.Can.CanMultiEcuView"
+             x:DataType="vm:CanMultiEcuViewModel">
+
+  <DockPanel Margin="16">
+    <TextBlock DockPanel.Dock="Top" Text="CAN Multi-ECU" FontSize="20" FontWeight="Bold" Margin="0,0,0,12"/>
+
+    <!-- Module selection -->
+    <TextBlock DockPanel.Dock="Top" Text="Select target modules:" Margin="0,0,0,4"/>
+    <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding Modules}" Margin="0,0,0,12">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:EcuItem">
+          <CheckBox IsChecked="{Binding IsSelected}" Margin="0,2">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBlock Text="{Binding Address, StringFormat='0x{0:X2}'}" FontFamily="Consolas" Width="50"/>
+              <TextBlock Text="{Binding Name}"/>
+            </StackPanel>
+          </CheckBox>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+
+    <Button DockPanel.Dock="Top" Content="Scan Selected Modules" Command="{Binding ScanCommand}" Margin="0,0,0,12"/>
+
+    <!-- Results -->
+    <DataGrid DockPanel.Dock="Top" ItemsSource="{Binding Results}"
+              AutoGenerateColumns="False" IsReadOnly="True"
+              CanUserResizeColumns="True" MinHeight="150">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="Address" Binding="{Binding Address}" Width="80"/>
+        <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="180"/>
+        <DataGridTextColumn Header="Protocol" Binding="{Binding Protocol}" Width="80"/>
+        <DataGridTextColumn Header="Identification" Binding="{Binding Identification}" Width="*"/>
+      </DataGrid.Columns>
+    </DataGrid>
+
+    <!-- Status -->
+    <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusText}" Margin="0,8,0,0" Foreground="Gray"/>
+
+    <Panel/>
+  </DockPanel>
+</UserControl>

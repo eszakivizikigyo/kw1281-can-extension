@@ -5,7 +5,7 @@ using BitFab.KW1281Test.Interface;
 
 namespace BitFab.KW1281Test.Ui.Services;
 
-internal class ConnectionService : IConnectionService, IDisposable
+public class ConnectionService : IConnectionService, IDisposable
 {
     private IInterface? _interface;
     private CanInterface? _canInterface;
@@ -16,8 +16,8 @@ internal class ConnectionService : IConnectionService, IDisposable
     public ConnectionMode Mode { get; private set; }
     public string? StatusText { get; private set; }
 
-    public Tester? Tester => _tester;
-    public CanInterface? CanInterface => _canInterface;
+    internal Tester? Tester => _tester;
+    internal CanInterface? CanInterface => _canInterface;
 
     public event EventHandler? StateChanged;
 

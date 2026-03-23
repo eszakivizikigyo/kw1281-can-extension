@@ -1,0 +1,53 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:BitFab.KW1281Test.Ui.ViewModels.KLine"
+             x:Class="BitFab.KW1281Test.Ui.Views.KLine.AdaptationView"
+             x:DataType="vm:AdaptationViewModel">
+
+    <DockPanel Margin="16">
+        <TextBlock DockPanel.Dock="Top" Text="Adaptation" FontSize="20" FontWeight="Bold" Margin="0,0,0,12" />
+
+        <StackPanel DockPanel.Dock="Top" Spacing="8" MaxWidth="500" HorizontalAlignment="Left">
+            <!-- Channel -->
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="Channel:" VerticalAlignment="Center" Width="100" />
+                <NumericUpDown Value="{Binding Channel}" Minimum="0" Maximum="255"
+                               FormatString="0" MinWidth="120" />
+            </StackPanel>
+
+            <!-- Value -->
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="Value:" VerticalAlignment="Center" Width="100" />
+                <NumericUpDown Value="{Binding ChannelValue}" Minimum="0" Maximum="65535"
+                               FormatString="0" MinWidth="120" />
+            </StackPanel>
+
+            <!-- Login -->
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <CheckBox Content="Login:" IsChecked="{Binding UseLogin}" Width="100" />
+                <NumericUpDown Value="{Binding Login}" Minimum="0" Maximum="65535"
+                               FormatString="0" MinWidth="120"
+                               IsEnabled="{Binding UseLogin}" />
+            </StackPanel>
+
+            <!-- Workshop Code -->
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="Workshop:" VerticalAlignment="Center" Width="100" />
+                <NumericUpDown Value="{Binding WorkshopCode}" Minimum="0" Maximum="99999"
+                               FormatString="0" MinWidth="120" />
+            </StackPanel>
+
+            <!-- Buttons -->
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                <Button Content="Read" Command="{Binding ReadCommand}" Classes="accent" />
+                <Button Content="Test" Command="{Binding TestCommand}" />
+                <Button Content="Save" Command="{Binding SaveCommand}" />
+            </StackPanel>
+
+            <!-- Status -->
+            <TextBlock Text="{Binding StatusText}" FontStyle="Italic"
+                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+        </StackPanel>
+    </DockPanel>
+
+</UserControl>

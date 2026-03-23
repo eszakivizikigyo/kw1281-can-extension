@@ -1,0 +1,37 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:BitFab.KW1281Test.Ui.ViewModels.Can"
+             x:Class="BitFab.KW1281Test.Ui.Views.Can.CanDiagView"
+             x:DataType="vm:CanDiagViewModel">
+
+  <DockPanel Margin="16">
+    <TextBlock DockPanel.Dock="Top" Text="CAN Diagnostics" FontSize="20" FontWeight="Bold" Margin="0,0,0,12"/>
+
+    <!-- Settings row -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,12">
+      <TextBlock Text="Controller:" VerticalAlignment="Center"/>
+      <NumericUpDown Value="{Binding ControllerAddress}" Minimum="1" Maximum="127" FormatString="0" Width="90"/>
+
+      <TextBlock Text="Protocol:" VerticalAlignment="Center" Margin="12,0,0,0"/>
+      <ComboBox SelectedItem="{Binding Protocol}" Width="120">
+        <ComboBoxItem Content="KWP2000"/>
+        <ComboBoxItem Content="UDS"/>
+      </ComboBox>
+    </StackPanel>
+
+    <!-- Action buttons -->
+    <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+      <Button Content="Connect &amp; Identify" Command="{Binding ConnectCommand}" Margin="0,0,8,8"/>
+      <Button Content="Read Ident (KWP)" Command="{Binding ReadIdentCommand}" Margin="0,0,8,8"/>
+      <Button Content="Read VIN (UDS)" Command="{Binding ReadVinCommand}" Margin="0,0,8,8"/>
+      <Button Content="Read Part No. (UDS)" Command="{Binding ReadPartNumberCommand}" Margin="0,0,8,8"/>
+      <Button Content="TesterPresent" Command="{Binding TesterPresentCommand}" Margin="0,0,8,8"/>
+      <Button Content="Extended Session (UDS)" Command="{Binding ExtendedSessionCommand}" Margin="0,0,8,8"/>
+    </WrapPanel>
+
+    <!-- Status -->
+    <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusText}" Margin="0,8,0,0" Foreground="Gray"/>
+
+    <Panel/>
+  </DockPanel>
+</UserControl>
