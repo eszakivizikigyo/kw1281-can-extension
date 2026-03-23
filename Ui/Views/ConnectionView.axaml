@@ -45,7 +45,7 @@
                 <TextBlock Text="Address:" VerticalAlignment="Center" />
                 <NumericUpDown Value="{Binding ControllerAddress}"
                                Minimum="1" Maximum="255"
-                               FormatString="X2"
+                               FormatString="0"
                                MinWidth="80" />
             </StackPanel>
 
