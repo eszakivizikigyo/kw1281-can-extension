@@ -10,6 +10,8 @@ public partial class CodingViewModel : ViewModelBase
 {
     private readonly ConnectionService _connectionService;
 
+    public IDialogService? DialogService { get; set; }
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SetCodingCommand))]
     [NotifyCanExecuteChangedFor(nameof(ReadIdentCommand))]
@@ -57,6 +59,10 @@ public partial class CodingViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanExecute))]
     private async Task SetCodingAsync()
     {
+        if (DialogService != null &&
+            !await DialogService.ConfirmAsync("Set Coding", $"Are you sure you want to set coding to {SoftwareCoding} with WSC {WorkshopCode}?"))
+            return;
+
         IsBusy = true;
         StatusText = $"Setting coding {SoftwareCoding}, WSC {WorkshopCode}...";
         try

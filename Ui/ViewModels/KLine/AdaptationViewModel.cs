@@ -10,6 +10,8 @@ public partial class AdaptationViewModel : ViewModelBase
 {
     private readonly ConnectionService _connectionService;
 
+    public IDialogService? DialogService { get; set; }
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ReadCommand))]
     [NotifyCanExecuteChangedFor(nameof(TestCommand))]
@@ -97,6 +99,10 @@ public partial class AdaptationViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanExecute))]
     private async Task SaveAsync()
     {
+        if (DialogService != null &&
+            !await DialogService.ConfirmAsync("Save Adaptation", $"Are you sure you want to save value {ChannelValue} to channel {Channel}?"))
+            return;
+
         IsBusy = true;
         StatusText = $"Saving channel {Channel} value {ChannelValue}...";
         try

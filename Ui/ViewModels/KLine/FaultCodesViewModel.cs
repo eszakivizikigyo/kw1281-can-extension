@@ -14,6 +14,8 @@ public partial class FaultCodesViewModel : ViewModelBase
 {
     private readonly ConnectionService _connectionService;
 
+    public IDialogService? DialogService { get; set; }
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ReadCommand))]
     [NotifyCanExecuteChangedFor(nameof(ClearCommand))]
@@ -60,6 +62,10 @@ public partial class FaultCodesViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanExecute))]
     private async Task ClearAsync()
     {
+        if (DialogService != null &&
+            !await DialogService.ConfirmAsync("Clear Fault Codes", "Are you sure you want to clear all fault codes?"))
+            return;
+
         IsBusy = true;
         FaultCodes.Clear();
         StatusText = "Clearing fault codes...";

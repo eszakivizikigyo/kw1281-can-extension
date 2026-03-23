@@ -14,7 +14,24 @@
         <views:ConnectionView DockPanel.Dock="Top"
                               DataContext="{Binding Connection}" />
 
-        <!-- Bottom: Log panel -->
+        <!-- Bottom: Status bar -->
+        <Border DockPanel.Dock="Bottom"
+                Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                Padding="8,4">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Theme:" VerticalAlignment="Center" />
+                    <ToggleSwitch IsChecked="{Binding IsDarkTheme}"
+                                  OnContent="Dark" OffContent="Light"
+                                  Padding="0" Margin="0" />
+                </StackPanel>
+                <TextBlock Text="{Binding ConnectionStatusText}"
+                           VerticalAlignment="Center"
+                           FontSize="12" />
+            </DockPanel>
+        </Border>
+
+        <!-- Log panel with splitter -->
         <GridSplitter DockPanel.Dock="Bottom" Height="5"
                       ResizeDirection="Rows"
                       Background="Transparent" />

@@ -10,6 +10,8 @@ public partial class ClusterViewModel : ViewModelBase
 {
     private readonly ConnectionService _connectionService;
 
+    public IDialogService? DialogService { get; set; }
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(GetSkcCommand))]
     [NotifyCanExecuteChangedFor(nameof(GetClusterIdCommand))]
@@ -73,6 +75,10 @@ public partial class ClusterViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanExecute))]
     private async Task ResetAsync()
     {
+        if (DialogService != null &&
+            !await DialogService.ConfirmAsync("Reset Cluster", "Are you sure you want to reset the cluster?"))
+            return;
+
         IsBusy = true;
         StatusText = "Resetting cluster...";
         try

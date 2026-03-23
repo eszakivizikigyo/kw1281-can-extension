@@ -1,3 +1,5 @@
+using System;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -18,6 +20,19 @@ public class App : Application
         {
             desktop.MainWindow = new MainWindow();
         }
+
+        // Global exception handlers
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            var ex = e.ExceptionObject as Exception;
+            Logger.Log?.WriteLine($"Unhandled exception: {ex?.Message}");
+        };
+
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            Logger.Log?.WriteLine($"Unobserved task exception: {e.Exception.Message}");
+            e.SetObserved();
+        };
 
         base.OnFrameworkInitializationCompleted();
     }

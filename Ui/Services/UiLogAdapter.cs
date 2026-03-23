@@ -16,7 +16,8 @@ internal class UiLogAdapter : ILog
 
     public void Write(string message, LogDest dest = LogDest.All)
     {
-        var entry = new LogEntry(DateTime.Now, message);
+        var level = ClassifyMessage(message);
+        var entry = new LogEntry(DateTime.Now, message, level);
         Dispatcher.UIThread.Post(() => Entries.Add(entry));
     }
 
@@ -28,11 +29,39 @@ internal class UiLogAdapter : ILog
 
     public void WriteLine(string message, LogDest dest = LogDest.All)
     {
-        var entry = new LogEntry(DateTime.Now, message);
+        var level = ClassifyMessage(message);
+        var entry = new LogEntry(DateTime.Now, message, level);
         Dispatcher.UIThread.Post(() => Entries.Add(entry));
     }
 
     public void Close() { }
 
     public void Dispose() { }
+
+    private static LogLevel ClassifyMessage(string message)
+    {
+        if (string.IsNullOrEmpty(message))
+            return LogLevel.Info;
+
+        if (message.StartsWith("TX", StringComparison.OrdinalIgnoreCase) ||
+            message.StartsWith("> TX", StringComparison.OrdinalIgnoreCase) ||
+            message.StartsWith("Sending", StringComparison.OrdinalIgnoreCase))
+            return LogLevel.Tx;
+
+        if (message.StartsWith("RX", StringComparison.OrdinalIgnoreCase) ||
+            message.StartsWith("< RX", StringComparison.OrdinalIgnoreCase) ||
+            message.StartsWith("Received", StringComparison.OrdinalIgnoreCase))
+            return LogLevel.Rx;
+
+        if (message.StartsWith("Error", StringComparison.OrdinalIgnoreCase) ||
+            message.StartsWith("Failed", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("error", StringComparison.OrdinalIgnoreCase))
+            return LogLevel.Error;
+
+        if (message.StartsWith("Warning", StringComparison.OrdinalIgnoreCase))
+            return LogLevel.Warning;
+
+        return LogLevel.Info;
+    }
 }

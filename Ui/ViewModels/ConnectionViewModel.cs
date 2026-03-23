@@ -71,11 +71,30 @@ public partial class ConnectionViewModel : ViewModelBase
 
     public ObservableCollection<string> AvailablePorts { get; } = [];
 
-    public ConnectionViewModel(IConnectionService connectionService)
+    public ConnectionViewModel(IConnectionService connectionService, AppSettings settings)
     {
         _connectionService = connectionService;
         _connectionService.StateChanged += OnConnectionStateChanged;
+
+        // Apply saved settings
+        if (settings.BaudRate > 0) _baudRate = settings.BaudRate;
+        if (!string.IsNullOrEmpty(settings.Mode) && Enum.TryParse<ConnectionMode>(settings.Mode, out var mode))
+            _mode = mode;
+        if (settings.ControllerAddress > 0) _controllerAddress = (byte)settings.ControllerAddress;
+
         RefreshPorts();
+
+        // Select saved port if available
+        if (!string.IsNullOrEmpty(settings.LastPort) && AvailablePorts.Contains(settings.LastPort))
+            SelectedPort = settings.LastPort;
+    }
+
+    public void SaveSettings(AppSettings settings)
+    {
+        settings.LastPort = SelectedPort;
+        settings.BaudRate = BaudRate;
+        settings.Mode = Mode.ToString();
+        settings.ControllerAddress = ControllerAddress;
     }
 
     [RelayCommand]

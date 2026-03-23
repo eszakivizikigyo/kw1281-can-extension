@@ -10,6 +10,8 @@ public partial class EepromViewModel : ViewModelBase
 {
     private readonly ConnectionService _connectionService;
 
+    public IDialogService? DialogService { get; set; }
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ReadCommand))]
     [NotifyCanExecuteChangedFor(nameof(WriteCommand))]
@@ -66,6 +68,10 @@ public partial class EepromViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanExecute))]
     private async Task WriteAsync()
     {
+        if (DialogService != null &&
+            !await DialogService.ConfirmAsync("Write EEPROM", $"Are you sure you want to write 0x{WriteValue:X2} to EEPROM at 0x{Address:X4}?"))
+            return;
+
         IsBusy = true;
         StatusText = $"Writing 0x{WriteValue:X2} to EEPROM at 0x{Address:X4}...";
         try

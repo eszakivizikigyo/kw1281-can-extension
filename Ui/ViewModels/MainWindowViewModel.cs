@@ -1,10 +1,14 @@
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using Avalonia;
+using Avalonia.Styling;
 using BitFab.KW1281Test.Ui.Models;
 using BitFab.KW1281Test.Ui.Services;
 using BitFab.KW1281Test.Ui.ViewModels.Can;
 using BitFab.KW1281Test.Ui.ViewModels.KLine;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 
 namespace BitFab.KW1281Test.Ui.ViewModels;
 
@@ -12,6 +16,7 @@ public partial class MainWindowViewModel : ViewModelBase
 {
     private readonly ConnectionService _connectionService;
     private readonly UiLogAdapter _logAdapter;
+    private readonly AppSettings _settings;
     private readonly Dictionary<string, ViewModelBase> _viewCache = new();
 
     public ConnectionViewModel Connection { get; }
@@ -23,20 +28,42 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private NavigationItem? _selectedNavigationItem;
 
+    [ObservableProperty]
+    private string _connectionStatusText = "Disconnected";
+
+    [ObservableProperty]
+    private bool _isDarkTheme;
+
+    public IDialogService? DialogService { get; set; }
+
     public ObservableCollection<NavigationItem> NavigationItems { get; }
 
     public MainWindowViewModel()
     {
+        _settings = SettingsService.Load();
         _connectionService = new ConnectionService();
         _logAdapter = new UiLogAdapter();
 
         // Set the global logger to the UI adapter
         Logger.Log = _logAdapter;
 
-        Connection = new ConnectionViewModel(_connectionService);
+        Connection = new ConnectionViewModel(_connectionService, _settings);
         Log = new LogViewModel(_logAdapter.Entries);
 
         NavigationItems = BuildNavigationTree();
+
+        _isDarkTheme = _settings.ThemeVariant == "Dark";
+        _connectionService.StateChanged += OnConnectionStateChanged;
+    }
+
+    partial void OnIsDarkThemeChanged(bool value)
+    {
+        if (Application.Current != null)
+        {
+            Application.Current.RequestedThemeVariant = value ? ThemeVariant.Dark : ThemeVariant.Light;
+        }
+        _settings.ThemeVariant = value ? "Dark" : "Light";
+        SettingsService.Save(_settings);
     }
 
     partial void OnSelectedNavigationItemChanged(NavigationItem? value)
@@ -56,20 +83,43 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private ViewModelBase? CreateViewModel(string tag) => tag switch
     {
-        "KLine.FaultCodes"  => new FaultCodesViewModel(_connectionService),
+        "KLine.FaultCodes"  => new FaultCodesViewModel(_connectionService) { DialogService = DialogService },
         "KLine.GroupRead"   => new GroupReadViewModel(_connectionService),
-        "KLine.Adaptation"  => new AdaptationViewModel(_connectionService),
+        "KLine.Adaptation"  => new AdaptationViewModel(_connectionService) { DialogService = DialogService },
         "KLine.ActuatorTest"=> new ActuatorTestViewModel(_connectionService),
-        "KLine.Coding"      => new CodingViewModel(_connectionService),
-        "KLine.Eeprom"      => new EepromViewModel(_connectionService),
+        "KLine.Coding"      => new CodingViewModel(_connectionService) { DialogService = DialogService },
+        "KLine.Eeprom"      => new EepromViewModel(_connectionService) { DialogService = DialogService },
         "KLine.Memory"      => new MemoryViewModel(_connectionService),
-        "KLine.Cluster"     => new ClusterViewModel(_connectionService),
+        "KLine.Cluster"     => new ClusterViewModel(_connectionService) { DialogService = DialogService },
         "Can.Monitor"       => new CanMonitorViewModel(_connectionService),
         "Can.AutoScan"      => new CanAutoScanViewModel(_connectionService),
         "Can.Diag"          => new CanDiagViewModel(_connectionService),
         "Can.MultiEcu"      => new CanMultiEcuViewModel(_connectionService),
         _ => null,
     };
+
+    public void SaveSettings(double width, double height)
+    {
+        _settings.WindowWidth = width;
+        _settings.WindowHeight = height;
+        Connection.SaveSettings(_settings);
+        SettingsService.Save(_settings);
+    }
+
+    private void OnConnectionStateChanged(object? sender, EventArgs e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            ConnectionStatusText = _connectionService.State switch
+            {
+                ConnectionState.Disconnected => "Disconnected",
+                ConnectionState.Connecting => "Connecting...",
+                ConnectionState.Connected => _connectionService.StatusText ?? "Connected",
+                ConnectionState.Disconnecting => "Disconnecting...",
+                _ => "Unknown"
+            };
+        });
+    }
 
     private static ObservableCollection<NavigationItem> BuildNavigationTree()
     {

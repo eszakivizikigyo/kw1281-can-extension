@@ -1,15 +1,25 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:BitFab.KW1281Test.Ui.ViewModels"
+             xmlns:conv="using:BitFab.KW1281Test.Ui.Converters"
              x:Class="BitFab.KW1281Test.Ui.Views.LogView"
              x:DataType="vm:LogViewModel">
 
+    <UserControl.Resources>
+        <conv:LogLevelToBrushConverter x:Key="LogLevelToBrush" />
+    </UserControl.Resources>
+
     <DockPanel>
-        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="8,4">
-            <TextBlock Text="Communication Log" FontWeight="SemiBold" VerticalAlignment="Center" />
-            <ToggleButton Content="Auto-scroll" IsChecked="{Binding AutoScroll}" />
-            <Button Content="Clear" Command="{Binding ClearCommand}" />
-        </StackPanel>
+        <WrapPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,4">
+            <TextBlock Text="Communication Log" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,12,0" />
+            <ToggleButton Content="Auto-scroll" IsChecked="{Binding AutoScroll}" Margin="0,0,4,0" />
+            <ToggleButton Content="Info" IsChecked="{Binding ShowInfo}" Margin="0,0,4,0" />
+            <ToggleButton Content="TX" IsChecked="{Binding ShowTx}" Margin="0,0,4,0" />
+            <ToggleButton Content="RX" IsChecked="{Binding ShowRx}" Margin="0,0,4,0" />
+            <ToggleButton Content="Errors" IsChecked="{Binding ShowErrors}" Margin="0,0,8,0" />
+            <Button Content="Clear" Command="{Binding ClearCommand}" Margin="0,0,4,0" />
+            <Button Content="Save" Command="{Binding SaveCommand}" />
+        </WrapPanel>
 
         <ListBox ItemsSource="{Binding Entries}"
                  Margin="8,0,8,8"
@@ -20,7 +30,7 @@
                     <TextBlock>
                         <Run Text="{Binding Timestamp, StringFormat='{}{0:HH:mm:ss.fff}'}" Foreground="Gray" />
                         <Run Text=" " />
-                        <Run Text="{Binding Message}" />
+                        <Run Text="{Binding Message}" Foreground="{Binding Message, Converter={StaticResource LogLevelToBrush}}" />
                     </TextBlock>
                 </DataTemplate>
             </ListBox.ItemTemplate>
