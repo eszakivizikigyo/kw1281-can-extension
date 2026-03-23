@@ -1,7 +1,9 @@
 ﻿global using static BitFab.KW1281Test.Program;
 
 using BitFab.KW1281Test.Interface;
+using BitFab.KW1281Test.Kwp2000;
 using BitFab.KW1281Test.Logging;
+using BitFab.KW1281Test.Uds;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -274,6 +276,30 @@ class Program
         
         switch (command.ToLower())
         {
+            case "cantest":
+                TestCanInterface(portName, baudRate);
+                return;
+
+            case "canmonitor":
+                MonitorCanBus(portName, baudRate);
+                return;
+
+            case "cantp":
+                TestTp20Channel(portName, baudRate, (byte)controllerAddress);
+                return;
+
+            case "canautoscan":
+                CanAutoScan(portName, baudRate);
+                return;
+
+            case "canuds":
+                TestUdsDialog(portName, baudRate, (byte)controllerAddress);
+                return;
+
+            case "canmulti":
+                CanMultiEcu(portName, baudRate);
+                return;
+
             case "autoscan":
                 AutoScan(@interface);
                 return;
@@ -534,6 +560,511 @@ class Program
         return true;
     }
 
+    private static void TestCanInterface(string portName, int baudRate)
+    {
+        Log.WriteLine("=== CAN Interface Test ===");
+        Log.WriteLine($"Port: {portName}, Baud: {baudRate}");
+        
+        try
+        {
+            using var canInterface = new CanInterface(portName, baudRate);
+            
+            Log.WriteLine("Initializing CAN interface...");
+            if (!canInterface.Initialize())
+            {
+                Log.WriteLine("Failed to initialize CAN interface");
+                return;
+            }
+            
+            Log.WriteLine("Setting CAN speed to 500 kbps...");
+            if (!canInterface.SetCanSpeed(500))
+            {
+                Log.WriteLine("Failed to set CAN speed");
+                return;
+            }
+            
+            Log.WriteLine("CAN interface ready!");
+            Log.WriteLine();
+            
+            // Send a test OBD-II request (Mode 01, PID 00 - supported PIDs)
+            Log.WriteLine("Sending test OBD-II request (Mode 01, PID 00)...");
+            var requestMsg = new CanMessage(0x7DF, new byte[] { 0x02, 0x01, 0x00, 0, 0, 0, 0, 0 });
+            
+            if (canInterface.SendCanMessage(requestMsg))
+            {
+                Log.WriteLine("Request sent successfully");
+                
+                // Try to receive response
+                Log.WriteLine("Waiting for response...");
+                for (int i = 0; i < 5; i++)
+                {
+                    var response = canInterface.ReceiveCanMessage(1000);
+                    if (response != null)
+                    {
+                        Log.WriteLine($"Received: {response}");
+                    }
+                    else
+                    {
+                        Log.WriteLine("No response received");
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                Log.WriteLine("Failed to send request");
+            }
+            
+            Log.WriteLine();
+            Log.WriteLine("CAN test completed");
+        }
+        catch (Exception ex)
+        {
+            Log.WriteLine($"CAN test failed: {ex.Message}");
+            Log.WriteLine($"Stack trace: {ex.StackTrace}");
+        }
+    }
+
+    private static void MonitorCanBus(string portName, int baudRate)
+    {
+        Log.WriteLine("=== CAN Bus Monitor ===");
+        Log.WriteLine($"Port: {portName}, Baud: {baudRate}");
+        Log.WriteLine("Press any key to stop monitoring.");
+        Log.WriteLine();
+
+        try
+        {
+            using var canInterface = new CanInterface(portName, baudRate);
+
+            if (!canInterface.Initialize())
+            {
+                Log.WriteLine("Failed to initialize CAN interface");
+                return;
+            }
+
+            if (!canInterface.SetCanSpeed(500))
+            {
+                Log.WriteLine("Failed to set CAN speed");
+                return;
+            }
+
+            // Enable CAN monitor mode - show all traffic
+            canInterface.SetMonitorMode(true);
+
+            Log.WriteLine("Monitoring CAN bus traffic (500 kbps)...");
+            Log.WriteLine("----------------------------------------------");
+
+            var messageCount = 0;
+            while (!Console.KeyAvailable)
+            {
+                var msg = canInterface.ReceiveCanMessage(500);
+                if (msg != null)
+                {
+                    messageCount++;
+                    Log.WriteLine($"[{messageCount,6}] {msg}");
+                }
+            }
+
+            // Consume the key press
+            Console.ReadKey(intercept: true);
+
+            Log.WriteLine();
+            Log.WriteLine($"Monitoring stopped. Total messages: {messageCount}");
+        }
+        catch (Exception ex)
+        {
+            Log.WriteLine($"CAN monitor failed: {ex.Message}");
+        }
+    }
+
+    private static void TestTp20Channel(string portName, int baudRate, byte controllerAddress)
+    {
+        Log.WriteLine("=== VW TP 2.0 KWP2000 Diagnostic Test ===");
+        Log.WriteLine($"Port: {portName}, Baud: {baudRate}, Controller: 0x{controllerAddress:X2}");
+
+        try
+        {
+            using var canInterface = new CanInterface(portName, baudRate);
+
+            Log.WriteLine("Initializing CAN interface...");
+            if (!canInterface.Initialize())
+            {
+                Log.WriteLine("Failed to initialize CAN interface");
+                return;
+            }
+
+            if (!canInterface.SetCanSpeed(500))
+            {
+                Log.WriteLine("Failed to set CAN speed to 500 kbps");
+                return;
+            }
+
+            Log.WriteLine("CAN interface ready. Opening TP 2.0 channel...");
+
+            using var channel = new Tp20Channel(canInterface, controllerAddress);
+            if (!channel.Open())
+            {
+                Log.WriteLine("Failed to open TP 2.0 channel");
+                return;
+            }
+
+            using var kwp2000 = new Kwp2000CanDialog(channel);
+
+            // Send ReadECUIdentification (service 0x1A, sub 0x9B)
+            Log.WriteLine("Reading ECU identification...");
+            try
+            {
+                var response = kwp2000.SendReceive(
+                    Kwp2000.DiagnosticService.readEcuIdentification,
+                    new byte[] { 0x9B });
+                Log.WriteLine($"ECU Identification: {Utils.DumpAscii(response.Body)}");
+            }
+            catch (Exception ex)
+            {
+                Log.WriteLine($"ReadECUIdentification failed: {ex.Message}");
+            }
+
+            // Send TesterPresent (service 0x3E) to verify connectivity
+            Log.WriteLine();
+            Log.WriteLine("Sending TesterPresent...");
+            try
+            {
+                kwp2000.SendReceive(
+                    Kwp2000.DiagnosticService.testerPresent,
+                    Array.Empty<byte>());
+                Log.WriteLine("TesterPresent positive response received!");
+            }
+            catch (Exception ex)
+            {
+                Log.WriteLine($"TesterPresent failed: {ex.Message}");
+            }
+
+            Log.WriteLine();
+            Log.WriteLine("TP 2.0 diagnostic test completed.");
+        }
+        catch (Exception ex)
+        {
+            Log.WriteLine($"TP 2.0 test failed: {ex.Message}");
+            Log.WriteLine($"Stack trace: {ex.StackTrace}");
+        }
+    }
+
+    private static void CanAutoScan(string portName, int baudRate)
+    {
+        Log.WriteLine("=== CAN AutoScan ===");
+        Log.WriteLine($"Port: {portName}, Baud: {baudRate}");
+        Log.WriteLine("Scanning VW TP 2.0 addresses 0x01-0x7F...");
+        Log.WriteLine();
+
+        try
+        {
+            using var canInterface = new CanInterface(portName, baudRate);
+
+            if (!canInterface.Initialize())
+            {
+                Log.WriteLine("Failed to initialize CAN interface");
+                return;
+            }
+
+            if (!canInterface.SetCanSpeed(500))
+            {
+                Log.WriteLine("Failed to set CAN speed to 500 kbps");
+                return;
+            }
+
+            var foundModules = new List<(byte Address, string Name, string Protocol, string Ident)>();
+
+            for (byte address = 0x01; address < 0x80; address++)
+            {
+                Log.Write($"\rScanning 0x{address:X2}...");
+
+                using var channel = new Tp20Channel(canInterface, address);
+                if (!channel.Open())
+                {
+                    continue;
+                }
+
+                var name = GetControllerName(address);
+                var protocol = "";
+                var ident = "";
+
+                // Try KWP2000 identification first
+                try
+                {
+                    using var kwp2000 = new Kwp2000CanDialog(channel);
+                    var response = kwp2000.SendReceive(
+                        Kwp2000.DiagnosticService.readEcuIdentification,
+                        new byte[] { 0x9B });
+                    ident = Utils.DumpAscii(response.Body).Trim();
+                    protocol = "KWP2000";
+                }
+                catch
+                {
+                    // KWP2000 failed — try UDS ReadDataByIdentifier (DID F190 = VIN or F187 = PartNumber)
+                    try
+                    {
+                        // Re-open channel since previous dialog may have disrupted it
+                        using var channel2 = new Tp20Channel(canInterface, address);
+                        if (channel2.Open())
+                        {
+                            using var uds = new UdsCanDialog(channel2);
+                            var partData = uds.ReadDataByIdentifier(0xF187);
+                            if (partData.Length > 2)
+                            {
+                                ident = Utils.DumpAscii(partData[2..]).Trim();
+                            }
+                            protocol = "UDS";
+                        }
+                    }
+                    catch
+                    {
+                        protocol = "TP2.0";
+                    }
+                }
+
+                foundModules.Add((address, name, protocol, ident));
+                Log.WriteLine($"\r  0x{address:X2} {name,-20} [{protocol,-7}] {ident}");
+            }
+
+            Log.WriteLine();
+            Log.WriteLine($"=== CAN AutoScan Results: {foundModules.Count} module(s) found ===");
+
+            foreach (var (address, name, protocol, ident) in foundModules)
+            {
+                Log.WriteLine($"  0x{address:X2} {name,-20} [{protocol,-7}] {ident}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.WriteLine($"\nCAN AutoScan failed: {ex.Message}");
+        }
+    }
+
+    internal static string GetControllerName(byte address)
+    {
+        if (Enum.IsDefined(typeof(ControllerAddress), (int)address))
+        {
+            return ((ControllerAddress)address).ToString();
+        }
+        return $"Module 0x{address:X2}";
+    }
+
+    private static void TestUdsDialog(string portName, int baudRate, byte controllerAddress)
+    {
+        Log.WriteLine("=== UDS (ISO 14229) Diagnostic Test ===");
+        Log.WriteLine($"Port: {portName}, Baud: {baudRate}, Controller: 0x{controllerAddress:X2}");
+
+        try
+        {
+            using var canInterface = new CanInterface(portName, baudRate);
+
+            if (!canInterface.Initialize())
+            {
+                Log.WriteLine("Failed to initialize CAN interface");
+                return;
+            }
+
+            if (!canInterface.SetCanSpeed(500))
+            {
+                Log.WriteLine("Failed to set CAN speed to 500 kbps");
+                return;
+            }
+
+            using var channel = new Tp20Channel(canInterface, controllerAddress);
+            if (!channel.Open())
+            {
+                Log.WriteLine("Failed to open TP 2.0 channel");
+                return;
+            }
+
+            using var uds = new UdsCanDialog(channel);
+
+            // DiagnosticSessionControl → Extended session (0x03)
+            Log.WriteLine("Starting extended diagnostic session...");
+            try
+            {
+                var sessionResponse = uds.DiagnosticSessionControl(0x03);
+                Log.WriteLine($"Session started ({sessionResponse.Length} bytes response)");
+            }
+            catch (NegativeUdsResponseException ex)
+            {
+                Log.WriteLine($"DiagnosticSessionControl failed: {ex.Message}");
+                Log.WriteLine("Continuing with default session...");
+            }
+
+            // ReadDataByIdentifier: DID F190 = VIN
+            Log.WriteLine();
+            Log.WriteLine("Reading VIN (DID F190)...");
+            try
+            {
+                var vinData = uds.ReadDataByIdentifier(0xF190);
+                if (vinData.Length >= 2)
+                {
+                    // Response: [DID_high, DID_low, ...VIN_bytes]
+                    var vin = System.Text.Encoding.ASCII.GetString(vinData, 2, vinData.Length - 2);
+                    Log.WriteLine($"VIN: {vin}");
+                }
+            }
+            catch (NegativeUdsResponseException ex)
+            {
+                Log.WriteLine($"Read VIN failed: {ex.Message}");
+            }
+
+            // ReadDataByIdentifier: DID F187 = Part Number
+            Log.WriteLine();
+            Log.WriteLine("Reading Part Number (DID F187)...");
+            try
+            {
+                var partData = uds.ReadDataByIdentifier(0xF187);
+                if (partData.Length >= 2)
+                {
+                    var partNum = Utils.DumpAscii(partData[2..]);
+                    Log.WriteLine($"Part Number: {partNum}");
+                }
+            }
+            catch (NegativeUdsResponseException ex)
+            {
+                Log.WriteLine($"Read Part Number failed: {ex.Message}");
+            }
+
+            // TesterPresent
+            Log.WriteLine();
+            Log.WriteLine("Sending TesterPresent...");
+            try
+            {
+                uds.TesterPresent();
+                Log.WriteLine("TesterPresent OK");
+            }
+            catch (NegativeUdsResponseException ex)
+            {
+                Log.WriteLine($"TesterPresent failed: {ex.Message}");
+            }
+
+            Log.WriteLine();
+            Log.WriteLine("UDS diagnostic test completed.");
+        }
+        catch (Exception ex)
+        {
+            Log.WriteLine($"UDS test failed: {ex.Message}");
+        }
+    }
+
+    private static void CanMultiEcu(string portName, int baudRate)
+    {
+        Log.WriteLine("=== CAN Multi-ECU Diagnostic Session ===");
+        Log.WriteLine($"Port: {portName}, Baud: {baudRate}");
+        Log.WriteLine("Opening simultaneous TP 2.0 channels to multiple ECUs...");
+        Log.WriteLine();
+
+        try
+        {
+            using var canInterface = new CanInterface(portName, baudRate);
+
+            if (!canInterface.Initialize())
+            {
+                Log.WriteLine("Failed to initialize CAN interface");
+                return;
+            }
+
+            if (!canInterface.SetCanSpeed(500))
+            {
+                Log.WriteLine("Failed to set CAN speed to 500 kbps");
+                return;
+            }
+
+            using var router = new CanRouter(canInterface);
+            using var session = new Tp20Session(router);
+
+            // Phase 1: Discover available modules by trying well-known addresses
+            byte[] targetAddresses =
+            [
+                0x01, // Engine (ECU)
+                0x02, // Transmission
+                0x09, // Central Electronics
+                0x17, // Instrument Cluster
+                0x19, // CAN Gateway
+                0x46, // Central Comfort
+                0x56, // Radio
+            ];
+
+            var openModules = new List<(byte Address, string Name)>();
+
+            foreach (var address in targetAddresses)
+            {
+                var name = GetControllerName(address);
+                Log.Write($"  Trying 0x{address:X2} ({name})...");
+
+                try
+                {
+                    session.OpenChannel(address);
+                    openModules.Add((address, name));
+                    Log.WriteLine(" OPEN");
+                }
+                catch
+                {
+                    Log.WriteLine(" no response");
+                }
+            }
+
+            if (openModules.Count == 0)
+            {
+                Log.WriteLine();
+                Log.WriteLine("No modules responded. Check CAN bus connection.");
+                return;
+            }
+
+            Log.WriteLine();
+            Log.WriteLine($"{openModules.Count} channel(s) open simultaneously.");
+            Log.WriteLine();
+
+            // Phase 2: Read identification from each open module
+            foreach (var (address, name) in openModules)
+            {
+                var channel = session.GetChannel(address);
+                if (channel == null) continue;
+
+                Log.WriteLine($"--- 0x{address:X2} {name} ---");
+
+                // Try KWP2000 ReadECUIdentification
+                try
+                {
+                    using var kwp2000 = new Kwp2000CanDialog(channel);
+                    var response = kwp2000.SendReceive(
+                        Kwp2000.DiagnosticService.readEcuIdentification,
+                        new byte[] { 0x9B });
+                    Log.WriteLine($"  ECU Ident: {Utils.DumpAscii(response.Body).Trim()}");
+                }
+                catch
+                {
+                    // Try UDS as fallback
+                    try
+                    {
+                        using var uds = new UdsCanDialog(channel);
+                        var partData = uds.ReadDataByIdentifier(0xF187);
+                        if (partData.Length > 2)
+                        {
+                            Log.WriteLine($"  Part No:   {Utils.DumpAscii(partData[2..]).Trim()}");
+                        }
+                    }
+                    catch
+                    {
+                        Log.WriteLine("  (identification not available)");
+                    }
+                }
+
+                // Keep-alive to maintain all channels
+                session.SendKeepAliveAll();
+            }
+
+            Log.WriteLine();
+            Log.WriteLine($"Multi-ECU session completed. {session.ChannelCount} channel(s) were open.");
+        }
+        catch (Exception ex)
+        {
+            Log.WriteLine($"\nMulti-ECU session failed: {ex.Message}");
+        }
+    }
+
     /// <summary>
     /// Opens the serial port.
     /// </summary>
@@ -590,6 +1121,18 @@ COMMAND =
     BasicSetting GROUP
         GROUP = Group number (0-255)
         (Group 0: Raw controller data)
+    CanAutoScan
+        Scan CAN bus for all VW TP 2.0 modules (addresses 0x01-0x7F)
+    CanMonitor
+        Monitor CAN bus traffic (passive, press any key to stop)
+    CanMulti
+        Open simultaneous TP 2.0 channels to multiple ECUs and read identification
+    CanTest
+        Test CAN interface initialization and basic communication
+    CanTp
+        Open a VW TP 2.0 channel and send a KWP2000 TesterPresent request
+    CanUds
+        Open a VW TP 2.0 channel and test UDS (ISO 14229) services
     ClarionVWPremium4SafeCode
     ClearFaultCodes
     DelcoVWPremium5SafeCode

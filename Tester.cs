@@ -1,6 +1,7 @@
 ﻿using BitFab.KW1281Test.Cluster;
 using BitFab.KW1281Test.EDC15;
 using BitFab.KW1281Test.Interface;
+using BitFab.KW1281Test.Kwp2000;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -54,6 +55,22 @@ internal class Tester
         var kwp2000 = new KW2000Dialog(_kwpCommon, (byte)_controllerAddress);
 
         return kwp2000;
+    }
+
+    /// <summary>
+    /// Open a KWP2000 diagnostic session over CAN bus using VW TP 2.0.
+    /// </summary>
+    public Kwp2000CanDialog Kwp2000CanWakeup(CanInterface canInterface)
+    {
+        Log.WriteLine("Opening TP 2.0 channel over CAN...");
+
+        var channel = new Tp20Channel(canInterface, (byte)_controllerAddress);
+        if (!channel.Open())
+        {
+            throw new UnableToProceedException();
+        }
+
+        return new Kwp2000CanDialog(channel);
     }
 
     public void EndCommunication()

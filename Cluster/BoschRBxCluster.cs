@@ -125,9 +125,9 @@ class BoschRBxCluster : ICluster
         return key;
     }
 
-    private readonly KW2000Dialog _kwp2000;
+    private readonly IKwp2000Dialog _kwp2000;
 
-    public BoschRBxCluster(KW2000Dialog kwp2000)
+    public BoschRBxCluster(IKwp2000Dialog kwp2000)
     {
         _kwp2000 = kwp2000;
     }
