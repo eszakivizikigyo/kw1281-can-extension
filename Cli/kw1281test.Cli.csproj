@@ -1,8 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <OutputType>Exe</OutputType>
     <TargetFramework>net9.0</TargetFramework>
-    <RootNamespace>BitFab.KW1281Test</RootNamespace>
+    <RootNamespace>BitFab.KW1281Test.Cli</RootNamespace>
+    <AssemblyName>kw1281test.cli</AssemblyName>
     <LangVersion>latest</LangVersion>
     <AssemblyVersion>1.0.1.0</AssemblyVersion>
     <FileVersion>1.0.1.0</FileVersion>
@@ -23,22 +25,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="GitHub\**" />
-    <Compile Remove="Tests\**" />
-    <Compile Remove="Cli\**" />
-    <Compile Remove="Ui\**" />
-    <EmbeddedResource Remove="GitHub\**" />
-    <EmbeddedResource Remove="Tests\**" />
-    <None Remove="GitHub\**" />
-    <None Remove="Tests\**" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <EmbeddedResource Include="EDC15\Loader.bin" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="System.IO.Ports" Version="10.0.0" />
+    <ProjectReference Include="..\kw1281test.csproj" />
   </ItemGroup>
 
 </Project>

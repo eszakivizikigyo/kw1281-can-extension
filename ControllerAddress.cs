@@ -1,4 +1,6 @@
-﻿namespace BitFab.KW1281Test
+﻿using System;
+
+namespace BitFab.KW1281Test
 {
     /// <summary>
     /// VW controller addresses
@@ -15,5 +17,17 @@
         CCM = 0x46,
         Radio = 0x56,
         RadioManufacturing = 0x7C,
+    }
+
+    internal static class ControllerAddressExtensions
+    {
+        public static string GetControllerName(byte address)
+        {
+            if (Enum.IsDefined(typeof(ControllerAddress), (int)address))
+            {
+                return ((ControllerAddress)address).ToString();
+            }
+            return $"Module 0x{address:X2}";
+        }
     }
 }

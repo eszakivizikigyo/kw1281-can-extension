@@ -1,4 +1,6 @@
 <Solution>
   <Project Path="kw1281test.csproj" />
+  <Project Path="Cli/kw1281test.Cli.csproj" />
+  <Project Path="Ui/kw1281test.Ui.csproj" />
   <Project Path="Tests/BitFab.KW1281Test.Tests.csproj" />
 </Solution>

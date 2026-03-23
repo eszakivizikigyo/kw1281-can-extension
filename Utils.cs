@@ -7,6 +7,66 @@ namespace BitFab.KW1281Test
 {
     internal static class Utils
     {
+        /// <summary>
+        /// Parse ADDRESS VALUE pairs from string arguments.
+        /// ADDRESS = EEPROM address in decimal (0-511) or hex ($00-$1FF)
+        /// VALUE = Value to be stored at address in decimal (0-255) or hex ($00-$FF)
+        /// </summary>
+        public static bool ParseAddressesAndValues(
+            List<string> addressesAndValues,
+            out List<KeyValuePair<ushort, byte>> addressValuePairs)
+        {
+            addressValuePairs = [];
+
+            if (addressesAndValues.Count % 2 != 0)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < addressesAndValues.Count; i += 2)
+            {
+                uint address;
+                var valueToParse = addressesAndValues[i];
+                try
+                {
+                    address = ParseUint(valueToParse);
+                }
+                catch (Exception)
+                {
+                    Logger.Log.WriteLine($"Invalid address (bad format): {valueToParse}.");
+                    return false;
+                }
+
+                if (address > 0x1FF)
+                {
+                    Logger.Log.WriteLine($"Invalid address (too large): {valueToParse}.");
+                    return false;
+                }
+
+                uint value;
+                valueToParse = addressesAndValues[i + 1];
+                try
+                {
+                    value = ParseUint(valueToParse);
+                }
+                catch (Exception)
+                {
+                    Logger.Log.WriteLine($"Invalid value (bad format): {valueToParse}.");
+                    return false;
+                }
+
+                if (value > 0xFF)
+                {
+                    Logger.Log.WriteLine($"Invalid value (too large): {valueToParse}.");
+                    return false;
+                }
+
+                addressValuePairs.Add(new KeyValuePair<ushort, byte>((ushort)address, (byte)value));
+            }
+
+            return true;
+        }
+
         public static string Dump(IEnumerable<byte> bytes)
         {
             var sb = new StringBuilder();

@@ -1,0 +1,58 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:BitFab.KW1281Test.Ui.ViewModels"
+        xmlns:views="using:BitFab.KW1281Test.Ui.Views"
+        xmlns:models="using:BitFab.KW1281Test.Ui.Models"
+        x:Class="BitFab.KW1281Test.Ui.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="KW1281Test Diagnostics"
+        Width="1100" Height="700"
+        MinWidth="800" MinHeight="500">
+
+    <DockPanel>
+        <!-- Top: Connection bar -->
+        <views:ConnectionView DockPanel.Dock="Top"
+                              DataContext="{Binding Connection}" />
+
+        <!-- Bottom: Log panel -->
+        <GridSplitter DockPanel.Dock="Bottom" Height="5"
+                      ResizeDirection="Rows"
+                      Background="Transparent" />
+        <Border DockPanel.Dock="Bottom" Height="180"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                BorderThickness="0,1,0,0">
+            <views:LogView DataContext="{Binding Log}" />
+        </Border>
+
+        <!-- Left: Navigation tree -->
+        <Border DockPanel.Dock="Left" Width="200"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                BorderThickness="0,0,1,0">
+            <TreeView ItemsSource="{Binding NavigationItems}"
+                      SelectedItem="{Binding SelectedNavigationItem}"
+                      Margin="4">
+                <TreeView.ItemTemplate>
+                    <TreeDataTemplate ItemsSource="{Binding Children}">
+                        <TextBlock Text="{Binding Title}" />
+                    </TreeDataTemplate>
+                </TreeView.ItemTemplate>
+            </TreeView>
+        </Border>
+
+        <!-- Center: Active view content -->
+        <Border Padding="16">
+            <ContentControl Content="{Binding CurrentView}">
+                <ContentControl.ContentTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="Select a function from the navigation panel."
+                                   VerticalAlignment="Center"
+                                   HorizontalAlignment="Center"
+                                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                   FontSize="16" />
+                    </DataTemplate>
+                </ContentControl.ContentTemplate>
+            </ContentControl>
+        </Border>
+    </DockPanel>
+
+</Window>

@@ -41,7 +41,7 @@ namespace BitFab.KW1281Test.Cluster
                 Log.WriteLine("Then please contact the program author with the results.");
                 Log.WriteLine();
 
-                var prefix = string.Join(' ', Program.CommandAndArgs.Take(4));
+                var prefix = string.Join(' ', Logger.CommandAndArgs.Take(4));
                 Log.WriteLine($"{prefix} DumpMarelliMem 3072 1024");
                 Log.WriteLine($"{prefix} DumpMarelliMem 14336 2048");
 

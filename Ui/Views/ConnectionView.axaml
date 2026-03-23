@@ -1,0 +1,70 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:BitFab.KW1281Test.Ui.ViewModels"
+             x:Class="BitFab.KW1281Test.Ui.Views.ConnectionView"
+             x:DataType="vm:ConnectionViewModel">
+
+    <Border Padding="12" BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+            BorderThickness="0,0,0,1">
+        <WrapPanel Orientation="Horizontal">
+            <!-- Port Selection -->
+            <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,12,4">
+                <TextBlock Text="Port:" VerticalAlignment="Center" />
+                <ComboBox ItemsSource="{Binding AvailablePorts}"
+                          SelectedItem="{Binding SelectedPort}"
+                          MinWidth="120" />
+                <Button Content="⟳" Command="{Binding RefreshPortsCommand}"
+                        ToolTip.Tip="Refresh ports" />
+            </StackPanel>
+
+            <!-- Baud Rate -->
+            <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,12,4">
+                <TextBlock Text="Baud:" VerticalAlignment="Center" />
+                <NumericUpDown Value="{Binding BaudRate}"
+                               Minimum="300" Maximum="115200"
+                               FormatString="0"
+                               MinWidth="100"
+                               IsVisible="{Binding IsKLineMode}" />
+                <TextBlock Text="115200 (fixed)" VerticalAlignment="Center"
+                           IsVisible="{Binding IsCanMode}" />
+            </StackPanel>
+
+            <!-- Mode Selection -->
+            <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,12,4">
+                <RadioButton Content="K-Line"
+                             IsChecked="{Binding IsKLineMode}"
+                             GroupName="ConnectionMode" />
+                <RadioButton Content="CAN"
+                             IsChecked="{Binding IsCanMode}"
+                             GroupName="ConnectionMode" />
+            </StackPanel>
+
+            <!-- Controller Address (K-Line only) -->
+            <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,12,4"
+                        IsVisible="{Binding IsKLineMode}">
+                <TextBlock Text="Address:" VerticalAlignment="Center" />
+                <NumericUpDown Value="{Binding ControllerAddress}"
+                               Minimum="1" Maximum="255"
+                               FormatString="X2"
+                               MinWidth="80" />
+            </StackPanel>
+
+            <!-- Connect / Disconnect -->
+            <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,12,4">
+                <Button Content="Connect"
+                        Command="{Binding ConnectCommand}"
+                        Classes="accent" />
+                <Button Content="Disconnect"
+                        Command="{Binding DisconnectCommand}" />
+            </StackPanel>
+
+            <!-- Status -->
+            <TextBlock Text="{Binding StatusText}"
+                       VerticalAlignment="Center"
+                       FontStyle="Italic"
+                       Margin="0,0,0,4"
+                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+        </WrapPanel>
+    </Border>
+
+</UserControl>

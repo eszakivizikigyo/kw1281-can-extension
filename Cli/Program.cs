@@ -1,5 +1,4 @@
-﻿global using static BitFab.KW1281Test.Program;
-
+using BitFab.KW1281Test;
 using BitFab.KW1281Test.Interface;
 using BitFab.KW1281Test.Kwp2000;
 using BitFab.KW1281Test.Logging;
@@ -11,32 +10,23 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.CompilerServices;
-using System.Text.RegularExpressions;
 using System.Threading;
 using BitFab.KW1281Test.EDC15;
-using System.Runtime.InteropServices;
 using System.IO;
 
-[assembly: InternalsVisibleTo("BitFab.KW1281Test.Tests")]
-
-namespace BitFab.KW1281Test;
+namespace BitFab.KW1281Test.Cli;
 
 class Program
 {
-    public static ILog Log { get; private set; } = new ConsoleLog();
-
-    internal static List<string> CommandAndArgs { get; private set; } = [];
-
     static void Main(string[] args)
     {
         try
         {
-            Log = new FileLog("KW1281Test.log");
+            Logger.Log = new FileLog("KW1281Test.log");
 
-            CommandAndArgs.Add(
+            Logger.CommandAndArgs.Add(
                 Path.GetFileNameWithoutExtension(Environment.GetCommandLineArgs()[0]));
-            CommandAndArgs.AddRange(args);
+            Logger.CommandAndArgs.AddRange(args);
 
             var tester = new Program();
             tester.Run(args);
@@ -46,12 +36,12 @@ class Program
         }
         catch (Exception ex)
         {
-            Log.WriteLine($"Caught: {ex.GetType()} {ex.Message}");
-            Log.WriteLine($"Unhandled exception: {ex}");
+            Logger.Log.WriteLine($"Caught: {ex.GetType()} {ex.Message}");
+            Logger.Log.WriteLine($"Unhandled exception: {ex}");
         }
         finally
         {
-            Log.Close();
+            Logger.Log.Close();
         }
     }
 
@@ -65,14 +55,14 @@ class Program
         Console.ResetColor();
         Console.WriteLine();
 
-        var version = GetType().GetTypeInfo().Assembly
+        var version = typeof(Tester).GetTypeInfo().Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!
             .InformationalVersion;
-        Log.WriteLine($"Version {version} (https://github.com/gmenounos/kw1281test/releases)");
-        Log.WriteLine($"Command Line: {string.Join(' ', CommandAndArgs)}");
-        Log.WriteLine($"OSVersion: {Environment.OSVersion}");
-        Log.WriteLine($".NET Version: {Environment.Version}");
-        Log.WriteLine($"Culture: {CultureInfo.InstalledUICulture}");
+        Logger.Log.WriteLine($"Version {version} (https://github.com/gmenounos/kw1281test/releases)");
+        Logger.Log.WriteLine($"Command Line: {string.Join(' ', Logger.CommandAndArgs)}");
+        Logger.Log.WriteLine($"OSVersion: {Environment.OSVersion}");
+        Logger.Log.WriteLine($".NET Version: {Environment.Version}");
+        Logger.Log.WriteLine($"Culture: {CultureInfo.InstalledUICulture}");
 
         if (args.Length < 4)
         {
@@ -172,13 +162,13 @@ class Program
             softwareCoding = (int)Utils.ParseUint(args[4]);
             if (softwareCoding > 32767)
             {
-                Log.WriteLine("SoftwareCoding cannot be greater than 32767.");
+                Logger.Log.WriteLine("SoftwareCoding cannot be greater than 32767.");
                 return;
             }
             workshopCode = (int)Utils.ParseUint(args[5]);
             if (workshopCode > 99999)
             {
-                Log.WriteLine("WorkshopCode cannot be greater than 99999.");
+                Logger.Log.WriteLine("WorkshopCode cannot be greater than 99999.");
                 return;
             }
         }
@@ -208,7 +198,7 @@ class Program
             var dateString = DateTime.Now.ToString("s").Replace(':', '-');
             _filename = $"EDC15_EEPROM_{dateString}.bin";
             
-            if (!ParseAddressesAndValues(args.Skip(4).ToList(), out addressValuePairs))
+            if (!Utils.ParseAddressesAndValues(args.Skip(4).ToList(), out addressValuePairs))
             {
                 ShowUsage();
                 return;
@@ -271,7 +261,7 @@ class Program
             login = ushort.Parse(args[4]);
         }
 
-        using var @interface = OpenPort(portName, baudRate);
+        using var @interface = InterfaceFactory.OpenPort(portName, baudRate);
         var tester = new Tester(@interface, controllerAddress);
         
         switch (command.ToLower())
@@ -479,7 +469,7 @@ class Program
                 var tester = new Tester(@interface, address);
                 try
                 {
-                    Log.WriteLine($"Attempting to wake up controller at address {address:X}{parity}...");
+                    Logger.Log.WriteLine($"Attempting to wake up controller at address {address:X}{parity}...");
                     tester.Kwp1281Wakeup(evenParity, failQuietly: true);
                     tester.EndCommunication();
                     kwp1281Addresses.Add($"{address:X}{parity}");
@@ -494,143 +484,82 @@ class Program
             }
         }
 
-        Log.WriteLine($"AutoScan Results:");
-        Log.WriteLine($"KWP1281: {string.Join(' ', kwp1281Addresses)}");
-        Log.WriteLine($"KWP2000: {string.Join(' ', kwp2000Addresses)}");
-    }
-
-    /// <summary>
-    /// Accept a series of string values in the format:
-    /// ADDRESS1 VALUE1 [ADDRESS2 VALUE2 ... ADDRESSn VALUEn]
-    ///     ADDRESS = EEPROM address in decimal (0-511) or hex ($00-$1FF)
-    ///     VALUE = Value to be stored at address in decimal (0-255) or hex ($00-$FF)
-    /// </summary>
-    internal static bool ParseAddressesAndValues(
-        List<string> addressesAndValues,
-        out List<KeyValuePair<ushort, byte>> addressValuePairs)
-    {
-        addressValuePairs = [];
-
-        if (addressesAndValues.Count % 2 != 0)
-        {
-            return false;
-        }
-
-        for (var i = 0; i < addressesAndValues.Count; i += 2)
-        {
-            uint address;
-            var valueToParse = addressesAndValues[i];
-            try
-            {
-                address = Utils.ParseUint(valueToParse);
-            }
-            catch (Exception)
-            {
-                Log.WriteLine($"Invalid address (bad format): {valueToParse}.");
-                return false;
-            }
-
-            if (address > 0x1FF)
-            {
-                Log.WriteLine($"Invalid address (too large): {valueToParse}.");
-                return false;
-            }
-
-            uint value;
-            valueToParse = addressesAndValues[i + 1];
-            try
-            {
-                value = Utils.ParseUint(valueToParse);
-            }
-            catch (Exception)
-            {
-                Log.WriteLine($"Invalid value (bad format): {valueToParse}.");
-                return false;
-            }
-
-            if (value > 0xFF)
-            {
-                Log.WriteLine($"Invalid value (too large): {valueToParse}.");
-                return false;
-            }
-
-            addressValuePairs.Add(new KeyValuePair<ushort, byte>((ushort)address, (byte)value));
-        }
-
-        return true;
+        Logger.Log.WriteLine($"AutoScan Results:");
+        Logger.Log.WriteLine($"KWP1281: {string.Join(' ', kwp1281Addresses)}");
+        Logger.Log.WriteLine($"KWP2000: {string.Join(' ', kwp2000Addresses)}");
     }
 
     private static void TestCanInterface(string portName, int baudRate)
     {
-        Log.WriteLine("=== CAN Interface Test ===");
-        Log.WriteLine($"Port: {portName}, Baud: {baudRate}");
+        Logger.Log.WriteLine("=== CAN Interface Test ===");
+        Logger.Log.WriteLine($"Port: {portName}, Baud: {baudRate}");
         
         try
         {
             using var canInterface = new CanInterface(portName, baudRate);
             
-            Log.WriteLine("Initializing CAN interface...");
+            Logger.Log.WriteLine("Initializing CAN interface...");
             if (!canInterface.Initialize())
             {
-                Log.WriteLine("Failed to initialize CAN interface");
+                Logger.Log.WriteLine("Failed to initialize CAN interface");
                 return;
             }
             
-            Log.WriteLine("Setting CAN speed to 500 kbps...");
+            Logger.Log.WriteLine("Setting CAN speed to 500 kbps...");
             if (!canInterface.SetCanSpeed(500))
             {
-                Log.WriteLine("Failed to set CAN speed");
+                Logger.Log.WriteLine("Failed to set CAN speed");
                 return;
             }
             
-            Log.WriteLine("CAN interface ready!");
-            Log.WriteLine();
+            Logger.Log.WriteLine("CAN interface ready!");
+            Logger.Log.WriteLine();
             
             // Send a test OBD-II request (Mode 01, PID 00 - supported PIDs)
-            Log.WriteLine("Sending test OBD-II request (Mode 01, PID 00)...");
+            Logger.Log.WriteLine("Sending test OBD-II request (Mode 01, PID 00)...");
             var requestMsg = new CanMessage(0x7DF, new byte[] { 0x02, 0x01, 0x00, 0, 0, 0, 0, 0 });
             
             if (canInterface.SendCanMessage(requestMsg))
             {
-                Log.WriteLine("Request sent successfully");
+                Logger.Log.WriteLine("Request sent successfully");
                 
                 // Try to receive response
-                Log.WriteLine("Waiting for response...");
+                Logger.Log.WriteLine("Waiting for response...");
                 for (int i = 0; i < 5; i++)
                 {
                     var response = canInterface.ReceiveCanMessage(1000);
                     if (response != null)
                     {
-                        Log.WriteLine($"Received: {response}");
+                        Logger.Log.WriteLine($"Received: {response}");
                     }
                     else
                     {
-                        Log.WriteLine("No response received");
+                        Logger.Log.WriteLine("No response received");
                         break;
                     }
                 }
             }
             else
             {
-                Log.WriteLine("Failed to send request");
+                Logger.Log.WriteLine("Failed to send request");
             }
             
-            Log.WriteLine();
-            Log.WriteLine("CAN test completed");
+            Logger.Log.WriteLine();
+            Logger.Log.WriteLine("CAN test completed");
         }
         catch (Exception ex)
         {
-            Log.WriteLine($"CAN test failed: {ex.Message}");
-            Log.WriteLine($"Stack trace: {ex.StackTrace}");
+            Logger.Log.WriteLine($"CAN test failed: {ex.Message}");
+            Logger.Log.WriteLine($"Stack trace: {ex.StackTrace}");
         }
     }
 
     private static void MonitorCanBus(string portName, int baudRate)
     {
-        Log.WriteLine("=== CAN Bus Monitor ===");
-        Log.WriteLine($"Port: {portName}, Baud: {baudRate}");
-        Log.WriteLine("Press any key to stop monitoring.");
-        Log.WriteLine();
+        Logger.Log.WriteLine("=== CAN Bus Monitor ===");
+        Logger.Log.WriteLine($"Port: {portName}, Baud: {baudRate}");
+        Logger.Log.WriteLine("Press any key to stop monitoring.");
+        Logger.Log.WriteLine();
 
         try
         {
@@ -638,21 +567,21 @@ class Program
 
             if (!canInterface.Initialize())
             {
-                Log.WriteLine("Failed to initialize CAN interface");
+                Logger.Log.WriteLine("Failed to initialize CAN interface");
                 return;
             }
 
             if (!canInterface.SetCanSpeed(500))
             {
-                Log.WriteLine("Failed to set CAN speed");
+                Logger.Log.WriteLine("Failed to set CAN speed");
                 return;
             }
 
             // Enable CAN monitor mode - show all traffic
             canInterface.SetMonitorMode(true);
 
-            Log.WriteLine("Monitoring CAN bus traffic (500 kbps)...");
-            Log.WriteLine("----------------------------------------------");
+            Logger.Log.WriteLine("Monitoring CAN bus traffic (500 kbps)...");
+            Logger.Log.WriteLine("----------------------------------------------");
 
             var messageCount = 0;
             while (!Console.KeyAvailable)
@@ -661,100 +590,100 @@ class Program
                 if (msg != null)
                 {
                     messageCount++;
-                    Log.WriteLine($"[{messageCount,6}] {msg}");
+                    Logger.Log.WriteLine($"[{messageCount,6}] {msg}");
                 }
             }
 
             // Consume the key press
             Console.ReadKey(intercept: true);
 
-            Log.WriteLine();
-            Log.WriteLine($"Monitoring stopped. Total messages: {messageCount}");
+            Logger.Log.WriteLine();
+            Logger.Log.WriteLine($"Monitoring stopped. Total messages: {messageCount}");
         }
         catch (Exception ex)
         {
-            Log.WriteLine($"CAN monitor failed: {ex.Message}");
+            Logger.Log.WriteLine($"CAN monitor failed: {ex.Message}");
         }
     }
 
     private static void TestTp20Channel(string portName, int baudRate, byte controllerAddress)
     {
-        Log.WriteLine("=== VW TP 2.0 KWP2000 Diagnostic Test ===");
-        Log.WriteLine($"Port: {portName}, Baud: {baudRate}, Controller: 0x{controllerAddress:X2}");
+        Logger.Log.WriteLine("=== VW TP 2.0 KWP2000 Diagnostic Test ===");
+        Logger.Log.WriteLine($"Port: {portName}, Baud: {baudRate}, Controller: 0x{controllerAddress:X2}");
 
         try
         {
             using var canInterface = new CanInterface(portName, baudRate);
 
-            Log.WriteLine("Initializing CAN interface...");
+            Logger.Log.WriteLine("Initializing CAN interface...");
             if (!canInterface.Initialize())
             {
-                Log.WriteLine("Failed to initialize CAN interface");
+                Logger.Log.WriteLine("Failed to initialize CAN interface");
                 return;
             }
 
             if (!canInterface.SetCanSpeed(500))
             {
-                Log.WriteLine("Failed to set CAN speed to 500 kbps");
+                Logger.Log.WriteLine("Failed to set CAN speed to 500 kbps");
                 return;
             }
 
-            Log.WriteLine("CAN interface ready. Opening TP 2.0 channel...");
+            Logger.Log.WriteLine("CAN interface ready. Opening TP 2.0 channel...");
 
             using var channel = new Tp20Channel(canInterface, controllerAddress);
             if (!channel.Open())
             {
-                Log.WriteLine("Failed to open TP 2.0 channel");
+                Logger.Log.WriteLine("Failed to open TP 2.0 channel");
                 return;
             }
 
             using var kwp2000 = new Kwp2000CanDialog(channel);
 
             // Send ReadECUIdentification (service 0x1A, sub 0x9B)
-            Log.WriteLine("Reading ECU identification...");
+            Logger.Log.WriteLine("Reading ECU identification...");
             try
             {
                 var response = kwp2000.SendReceive(
-                    Kwp2000.DiagnosticService.readEcuIdentification,
+                    DiagnosticService.readEcuIdentification,
                     new byte[] { 0x9B });
-                Log.WriteLine($"ECU Identification: {Utils.DumpAscii(response.Body)}");
+                Logger.Log.WriteLine($"ECU Identification: {Utils.DumpAscii(response.Body)}");
             }
             catch (Exception ex)
             {
-                Log.WriteLine($"ReadECUIdentification failed: {ex.Message}");
+                Logger.Log.WriteLine($"ReadECUIdentification failed: {ex.Message}");
             }
 
             // Send TesterPresent (service 0x3E) to verify connectivity
-            Log.WriteLine();
-            Log.WriteLine("Sending TesterPresent...");
+            Logger.Log.WriteLine();
+            Logger.Log.WriteLine("Sending TesterPresent...");
             try
             {
                 kwp2000.SendReceive(
-                    Kwp2000.DiagnosticService.testerPresent,
+                    DiagnosticService.testerPresent,
                     Array.Empty<byte>());
-                Log.WriteLine("TesterPresent positive response received!");
+                Logger.Log.WriteLine("TesterPresent positive response received!");
             }
             catch (Exception ex)
             {
-                Log.WriteLine($"TesterPresent failed: {ex.Message}");
+                Logger.Log.WriteLine($"TesterPresent failed: {ex.Message}");
             }
 
-            Log.WriteLine();
-            Log.WriteLine("TP 2.0 diagnostic test completed.");
+            Logger.Log.WriteLine();
+            Logger.Log.WriteLine("TP 2.0 diagnostic test completed.");
         }
         catch (Exception ex)
         {
-            Log.WriteLine($"TP 2.0 test failed: {ex.Message}");
-            Log.WriteLine($"Stack trace: {ex.StackTrace}");
+            Logger.Log.WriteLine($"TP 2.0 test failed: {ex.Message}");
+            Logger.Log.WriteLine($"Stack trace: {ex.StackTrace}");
         }
     }
 
     private static void CanAutoScan(string portName, int baudRate)
     {
-        Log.WriteLine("=== CAN AutoScan ===");
-        Log.WriteLine($"Port: {portName}, Baud: {baudRate}");
-        Log.WriteLine("Scanning VW TP 2.0 addresses 0x01-0x7F...");
-        Log.WriteLine();
+        Logger.Log.WriteLine("=== CAN AutoScan ===");
+        Logger.Log.WriteLine($"Port: {portName}, Baud: {baudRate}");
+        Logger.Log.WriteLine("Scanning VW TP 2.0 addresses 0x01-0x7F...");
+        Logger.Log.WriteLine();
 
         try
         {
@@ -762,13 +691,13 @@ class Program
 
             if (!canInterface.Initialize())
             {
-                Log.WriteLine("Failed to initialize CAN interface");
+                Logger.Log.WriteLine("Failed to initialize CAN interface");
                 return;
             }
 
             if (!canInterface.SetCanSpeed(500))
             {
-                Log.WriteLine("Failed to set CAN speed to 500 kbps");
+                Logger.Log.WriteLine("Failed to set CAN speed to 500 kbps");
                 return;
             }
 
@@ -776,7 +705,7 @@ class Program
 
             for (byte address = 0x01; address < 0x80; address++)
             {
-                Log.Write($"\rScanning 0x{address:X2}...");
+                Logger.Log.Write($"\rScanning 0x{address:X2}...");
 
                 using var channel = new Tp20Channel(canInterface, address);
                 if (!channel.Open())
@@ -784,7 +713,7 @@ class Program
                     continue;
                 }
 
-                var name = GetControllerName(address);
+                var name = ControllerAddressExtensions.GetControllerName(address);
                 var protocol = "";
                 var ident = "";
 
@@ -793,7 +722,7 @@ class Program
                 {
                     using var kwp2000 = new Kwp2000CanDialog(channel);
                     var response = kwp2000.SendReceive(
-                        Kwp2000.DiagnosticService.readEcuIdentification,
+                        DiagnosticService.readEcuIdentification,
                         new byte[] { 0x9B });
                     ident = Utils.DumpAscii(response.Body).Trim();
                     protocol = "KWP2000";
@@ -823,36 +752,27 @@ class Program
                 }
 
                 foundModules.Add((address, name, protocol, ident));
-                Log.WriteLine($"\r  0x{address:X2} {name,-20} [{protocol,-7}] {ident}");
+                Logger.Log.WriteLine($"\r  0x{address:X2} {name,-20} [{protocol,-7}] {ident}");
             }
 
-            Log.WriteLine();
-            Log.WriteLine($"=== CAN AutoScan Results: {foundModules.Count} module(s) found ===");
+            Logger.Log.WriteLine();
+            Logger.Log.WriteLine($"=== CAN AutoScan Results: {foundModules.Count} module(s) found ===");
 
             foreach (var (address, name, protocol, ident) in foundModules)
             {
-                Log.WriteLine($"  0x{address:X2} {name,-20} [{protocol,-7}] {ident}");
+                Logger.Log.WriteLine($"  0x{address:X2} {name,-20} [{protocol,-7}] {ident}");
             }
         }
         catch (Exception ex)
         {
-            Log.WriteLine($"\nCAN AutoScan failed: {ex.Message}");
+            Logger.Log.WriteLine($"\nCAN AutoScan failed: {ex.Message}");
         }
-    }
-
-    internal static string GetControllerName(byte address)
-    {
-        if (Enum.IsDefined(typeof(ControllerAddress), (int)address))
-        {
-            return ((ControllerAddress)address).ToString();
-        }
-        return $"Module 0x{address:X2}";
     }
 
     private static void TestUdsDialog(string portName, int baudRate, byte controllerAddress)
     {
-        Log.WriteLine("=== UDS (ISO 14229) Diagnostic Test ===");
-        Log.WriteLine($"Port: {portName}, Baud: {baudRate}, Controller: 0x{controllerAddress:X2}");
+        Logger.Log.WriteLine("=== UDS (ISO 14229) Diagnostic Test ===");
+        Logger.Log.WriteLine($"Port: {portName}, Baud: {baudRate}, Controller: 0x{controllerAddress:X2}");
 
         try
         {
@@ -860,41 +780,41 @@ class Program
 
             if (!canInterface.Initialize())
             {
-                Log.WriteLine("Failed to initialize CAN interface");
+                Logger.Log.WriteLine("Failed to initialize CAN interface");
                 return;
             }
 
             if (!canInterface.SetCanSpeed(500))
             {
-                Log.WriteLine("Failed to set CAN speed to 500 kbps");
+                Logger.Log.WriteLine("Failed to set CAN speed to 500 kbps");
                 return;
             }
 
             using var channel = new Tp20Channel(canInterface, controllerAddress);
             if (!channel.Open())
             {
-                Log.WriteLine("Failed to open TP 2.0 channel");
+                Logger.Log.WriteLine("Failed to open TP 2.0 channel");
                 return;
             }
 
             using var uds = new UdsCanDialog(channel);
 
             // DiagnosticSessionControl → Extended session (0x03)
-            Log.WriteLine("Starting extended diagnostic session...");
+            Logger.Log.WriteLine("Starting extended diagnostic session...");
             try
             {
                 var sessionResponse = uds.DiagnosticSessionControl(0x03);
-                Log.WriteLine($"Session started ({sessionResponse.Length} bytes response)");
+                Logger.Log.WriteLine($"Session started ({sessionResponse.Length} bytes response)");
             }
             catch (NegativeUdsResponseException ex)
             {
-                Log.WriteLine($"DiagnosticSessionControl failed: {ex.Message}");
-                Log.WriteLine("Continuing with default session...");
+                Logger.Log.WriteLine($"DiagnosticSessionControl failed: {ex.Message}");
+                Logger.Log.WriteLine("Continuing with default session...");
             }
 
             // ReadDataByIdentifier: DID F190 = VIN
-            Log.WriteLine();
-            Log.WriteLine("Reading VIN (DID F190)...");
+            Logger.Log.WriteLine();
+            Logger.Log.WriteLine("Reading VIN (DID F190)...");
             try
             {
                 var vinData = uds.ReadDataByIdentifier(0xF190);
@@ -902,59 +822,59 @@ class Program
                 {
                     // Response: [DID_high, DID_low, ...VIN_bytes]
                     var vin = System.Text.Encoding.ASCII.GetString(vinData, 2, vinData.Length - 2);
-                    Log.WriteLine($"VIN: {vin}");
+                    Logger.Log.WriteLine($"VIN: {vin}");
                 }
             }
             catch (NegativeUdsResponseException ex)
             {
-                Log.WriteLine($"Read VIN failed: {ex.Message}");
+                Logger.Log.WriteLine($"Read VIN failed: {ex.Message}");
             }
 
             // ReadDataByIdentifier: DID F187 = Part Number
-            Log.WriteLine();
-            Log.WriteLine("Reading Part Number (DID F187)...");
+            Logger.Log.WriteLine();
+            Logger.Log.WriteLine("Reading Part Number (DID F187)...");
             try
             {
                 var partData = uds.ReadDataByIdentifier(0xF187);
                 if (partData.Length >= 2)
                 {
                     var partNum = Utils.DumpAscii(partData[2..]);
-                    Log.WriteLine($"Part Number: {partNum}");
+                    Logger.Log.WriteLine($"Part Number: {partNum}");
                 }
             }
             catch (NegativeUdsResponseException ex)
             {
-                Log.WriteLine($"Read Part Number failed: {ex.Message}");
+                Logger.Log.WriteLine($"Read Part Number failed: {ex.Message}");
             }
 
             // TesterPresent
-            Log.WriteLine();
-            Log.WriteLine("Sending TesterPresent...");
+            Logger.Log.WriteLine();
+            Logger.Log.WriteLine("Sending TesterPresent...");
             try
             {
                 uds.TesterPresent();
-                Log.WriteLine("TesterPresent OK");
+                Logger.Log.WriteLine("TesterPresent OK");
             }
             catch (NegativeUdsResponseException ex)
             {
-                Log.WriteLine($"TesterPresent failed: {ex.Message}");
+                Logger.Log.WriteLine($"TesterPresent failed: {ex.Message}");
             }
 
-            Log.WriteLine();
-            Log.WriteLine("UDS diagnostic test completed.");
+            Logger.Log.WriteLine();
+            Logger.Log.WriteLine("UDS diagnostic test completed.");
         }
         catch (Exception ex)
         {
-            Log.WriteLine($"UDS test failed: {ex.Message}");
+            Logger.Log.WriteLine($"UDS test failed: {ex.Message}");
         }
     }
 
     private static void CanMultiEcu(string portName, int baudRate)
     {
-        Log.WriteLine("=== CAN Multi-ECU Diagnostic Session ===");
-        Log.WriteLine($"Port: {portName}, Baud: {baudRate}");
-        Log.WriteLine("Opening simultaneous TP 2.0 channels to multiple ECUs...");
-        Log.WriteLine();
+        Logger.Log.WriteLine("=== CAN Multi-ECU Diagnostic Session ===");
+        Logger.Log.WriteLine($"Port: {portName}, Baud: {baudRate}");
+        Logger.Log.WriteLine("Opening simultaneous TP 2.0 channels to multiple ECUs...");
+        Logger.Log.WriteLine();
 
         try
         {
@@ -962,13 +882,13 @@ class Program
 
             if (!canInterface.Initialize())
             {
-                Log.WriteLine("Failed to initialize CAN interface");
+                Logger.Log.WriteLine("Failed to initialize CAN interface");
                 return;
             }
 
             if (!canInterface.SetCanSpeed(500))
             {
-                Log.WriteLine("Failed to set CAN speed to 500 kbps");
+                Logger.Log.WriteLine("Failed to set CAN speed to 500 kbps");
                 return;
             }
 
@@ -991,31 +911,31 @@ class Program
 
             foreach (var address in targetAddresses)
             {
-                var name = GetControllerName(address);
-                Log.Write($"  Trying 0x{address:X2} ({name})...");
+                var name = ControllerAddressExtensions.GetControllerName(address);
+                Logger.Log.Write($"  Trying 0x{address:X2} ({name})...");
 
                 try
                 {
                     session.OpenChannel(address);
                     openModules.Add((address, name));
-                    Log.WriteLine(" OPEN");
+                    Logger.Log.WriteLine(" OPEN");
                 }
                 catch
                 {
-                    Log.WriteLine(" no response");
+                    Logger.Log.WriteLine(" no response");
                 }
             }
 
             if (openModules.Count == 0)
             {
-                Log.WriteLine();
-                Log.WriteLine("No modules responded. Check CAN bus connection.");
+                Logger.Log.WriteLine();
+                Logger.Log.WriteLine("No modules responded. Check CAN bus connection.");
                 return;
             }
 
-            Log.WriteLine();
-            Log.WriteLine($"{openModules.Count} channel(s) open simultaneously.");
-            Log.WriteLine();
+            Logger.Log.WriteLine();
+            Logger.Log.WriteLine($"{openModules.Count} channel(s) open simultaneously.");
+            Logger.Log.WriteLine();
 
             // Phase 2: Read identification from each open module
             foreach (var (address, name) in openModules)
@@ -1023,16 +943,16 @@ class Program
                 var channel = session.GetChannel(address);
                 if (channel == null) continue;
 
-                Log.WriteLine($"--- 0x{address:X2} {name} ---");
+                Logger.Log.WriteLine($"--- 0x{address:X2} {name} ---");
 
                 // Try KWP2000 ReadECUIdentification
                 try
                 {
                     using var kwp2000 = new Kwp2000CanDialog(channel);
                     var response = kwp2000.SendReceive(
-                        Kwp2000.DiagnosticService.readEcuIdentification,
+                        DiagnosticService.readEcuIdentification,
                         new byte[] { 0x9B });
-                    Log.WriteLine($"  ECU Ident: {Utils.DumpAscii(response.Body).Trim()}");
+                    Logger.Log.WriteLine($"  ECU Ident: {Utils.DumpAscii(response.Body).Trim()}");
                 }
                 catch
                 {
@@ -1043,12 +963,12 @@ class Program
                         var partData = uds.ReadDataByIdentifier(0xF187);
                         if (partData.Length > 2)
                         {
-                            Log.WriteLine($"  Part No:   {Utils.DumpAscii(partData[2..]).Trim()}");
+                            Logger.Log.WriteLine($"  Part No:   {Utils.DumpAscii(partData[2..]).Trim()}");
                         }
                     }
                     catch
                     {
-                        Log.WriteLine("  (identification not available)");
+                        Logger.Log.WriteLine("  (identification not available)");
                     }
                 }
 
@@ -1056,47 +976,18 @@ class Program
                 session.SendKeepAliveAll();
             }
 
-            Log.WriteLine();
-            Log.WriteLine($"Multi-ECU session completed. {session.ChannelCount} channel(s) were open.");
+            Logger.Log.WriteLine();
+            Logger.Log.WriteLine($"Multi-ECU session completed. {session.ChannelCount} channel(s) were open.");
         }
         catch (Exception ex)
         {
-            Log.WriteLine($"\nMulti-ECU session failed: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Opens the serial port.
-    /// </summary>
-    /// <param name="portName">
-    /// Either the device name of a serial port (e.g. COM1, /dev/tty23)
-    /// or an FTDI USB->Serial device serial number (2 letters followed by 6 letters/numbers).
-    /// </param>
-    /// <param name="baudRate"></param>
-    /// <returns></returns>
-    private static IInterface OpenPort(string portName, int baudRate)
-    {
-        if (Regex.IsMatch(portName.ToUpper(), @"\A[A-Z0-9]{8}\Z"))
-        {
-            Log.WriteLine($"Opening FTDI serial port {portName}");
-            return new FtdiInterface(portName, baudRate);
-        }
-        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) &&
-            portName.StartsWith("/dev/", StringComparison.CurrentCultureIgnoreCase))
-        {
-            Log.WriteLine($"Opening Linux serial port {portName}");
-            return new LinuxInterface(portName, baudRate);
-        }
-        else
-        {
-            Log.WriteLine($"Opening Generic serial port {portName}");
-            return new GenericInterface(portName, baudRate);
+            Logger.Log.WriteLine($"\nMulti-ECU session failed: {ex.Message}");
         }
     }
 
     private static void ShowUsage()
     {
-        Log.WriteLine("""
+        Logger.Log.WriteLine("""
 Usage: KW1281Test PORT BAUD ADDRESS COMMAND [args]
                 
 PORT = COM1|COM2|etc. (Windows)

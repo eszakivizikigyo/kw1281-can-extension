@@ -1,0 +1,30 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:BitFab.KW1281Test.Ui.ViewModels"
+             x:Class="BitFab.KW1281Test.Ui.Views.LogView"
+             x:DataType="vm:LogViewModel">
+
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="8,4">
+            <TextBlock Text="Communication Log" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <ToggleButton Content="Auto-scroll" IsChecked="{Binding AutoScroll}" />
+            <Button Content="Clear" Command="{Binding ClearCommand}" />
+        </StackPanel>
+
+        <ListBox ItemsSource="{Binding Entries}"
+                 Margin="8,0,8,8"
+                 FontFamily="Cascadia Mono, Consolas, Courier New, monospace"
+                 FontSize="12">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock>
+                        <Run Text="{Binding Timestamp, StringFormat='{}{0:HH:mm:ss.fff}'}" Foreground="Gray" />
+                        <Run Text=" " />
+                        <Run Text="{Binding Message}" />
+                    </TextBlock>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </DockPanel>
+
+</UserControl>
