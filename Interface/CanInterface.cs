@@ -81,6 +81,7 @@ namespace BitFab.KW1281Test.Interface
 
         /// <summary>
         /// Initialize the CAN interface with basic ELM327 settings.
+        /// Auto-detects baud rate if the initial rate fails.
         /// </summary>
         public bool Initialize()
         {
@@ -90,12 +91,34 @@ namespace BitFab.KW1281Test.Interface
                 {
                     Log.WriteLine("Initializing CAN interface...");
 
-                    // Reset device
-                    if (!SendCommand("ATZ"))
+                    // Try ATZ at the current baud rate first
+                    if (!TryReset())
                     {
-                        Log.WriteLine("Failed to reset device");
-                        return false;
+                        // Auto-detect baud rate
+                        Log.WriteLine("ATZ failed — trying other baud rates...");
+                        int[] candidates = [38400, 9600, 115200, 500000];
+                        bool found = false;
+
+                        foreach (var rate in candidates)
+                        {
+                            if (rate == _port.BaudRate) continue;
+                            Log.WriteLine($"Trying {rate} baud...");
+                            _port.BaudRate = rate;
+                            if (TryReset())
+                            {
+                                Log.WriteLine($"ELM327 detected at {rate} baud");
+                                found = true;
+                                break;
+                            }
+                        }
+
+                        if (!found)
+                        {
+                            Log.WriteLine("Failed to reset device at any baud rate");
+                            return false;
+                        }
                     }
+
                     Thread.Sleep(500); // Wait for reset
 
                     // Turn off echo
@@ -275,6 +298,36 @@ namespace BitFab.KW1281Test.Interface
                     _port.DiscardInBuffer();
                 }
                 return true;
+            }
+        }
+
+        /// <summary>
+        /// Attempt ATZ reset at current baud rate. Returns true if the device responds with "ELM".
+        /// Does NOT hold _lock — caller must be outside lock or use carefully.
+        /// </summary>
+        private bool TryReset()
+        {
+            try
+            {
+                _port.DiscardInBuffer();
+                _port.DiscardOutBuffer();
+
+                // Send a bare CR first to interrupt any pending state
+                _port.Write("\r");
+                Thread.Sleep(100);
+                _port.DiscardInBuffer();
+
+                Log.WriteLine($"Sending: ATZ");
+                _port.WriteLine("ATZ");
+
+                var response = ReadResponse();
+                Log.WriteLine($"Response: {response}");
+
+                return response.Contains("ELM");
+            }
+            catch
+            {
+                return false;
             }
         }
 
