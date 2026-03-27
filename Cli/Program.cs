@@ -1,4 +1,5 @@
 using BitFab.KW1281Test;
+using BitFab.KW1281Test.Cluster;
 using BitFab.KW1281Test.Interface;
 using BitFab.KW1281Test.Kwp2000;
 using BitFab.KW1281Test.Logging;
@@ -288,6 +289,10 @@ class Program
 
             case "canmulti":
                 CanMultiEcu(portName, baudRate);
+                return;
+
+            case "cangetskc":
+                CanGetSkc(portName, baudRate);
                 return;
 
             case "autoscan":
@@ -622,9 +627,9 @@ class Program
                 return;
             }
 
-            if (!canInterface.SetCanSpeed(500))
+            if (!canInterface.InitializeRawCan(500))
             {
-                Logger.Log.WriteLine("Failed to set CAN speed to 500 kbps");
+                Logger.Log.WriteLine("Failed to initialize raw CAN mode");
                 return;
             }
 
@@ -695,9 +700,9 @@ class Program
                 return;
             }
 
-            if (!canInterface.SetCanSpeed(500))
+            if (!canInterface.InitializeRawCan(500))
             {
-                Logger.Log.WriteLine("Failed to set CAN speed to 500 kbps");
+                Logger.Log.WriteLine("Failed to initialize raw CAN mode");
                 return;
             }
 
@@ -784,9 +789,9 @@ class Program
                 return;
             }
 
-            if (!canInterface.SetCanSpeed(500))
+            if (!canInterface.InitializeRawCan(500))
             {
-                Logger.Log.WriteLine("Failed to set CAN speed to 500 kbps");
+                Logger.Log.WriteLine("Failed to initialize raw CAN mode");
                 return;
             }
 
@@ -886,9 +891,9 @@ class Program
                 return;
             }
 
-            if (!canInterface.SetCanSpeed(500))
+            if (!canInterface.InitializeRawCan(500))
             {
-                Logger.Log.WriteLine("Failed to set CAN speed to 500 kbps");
+                Logger.Log.WriteLine("Failed to initialize raw CAN mode");
                 return;
             }
 
@@ -985,6 +990,122 @@ class Program
         }
     }
 
+    private static void CanGetSkc(string portName, int baudRate)
+    {
+        Logger.Log.WriteLine("=== CAN Get SKC (Instrument Cluster) ===");
+        Logger.Log.WriteLine($"Port: {portName}, Baud: {baudRate}");
+
+        try
+        {
+            using var canInterface = new CanInterface(portName, baudRate);
+
+            if (!canInterface.Initialize())
+            {
+                Logger.Log.WriteLine("Failed to initialize CAN interface");
+                return;
+            }
+
+            if (!canInterface.InitializeRawCan(500))
+            {
+                Logger.Log.WriteLine("Failed to initialize raw CAN mode");
+                return;
+            }
+
+            const byte clusterAddress = 0x17;
+
+            using var channel = new Tp20Channel(canInterface, clusterAddress);
+            if (!channel.Open())
+            {
+                Logger.Log.WriteLine("Failed to open TP 2.0 channel to instrument cluster (0x17)");
+                return;
+            }
+
+            using var kwp2000 = new Kwp2000CanDialog(channel);
+
+            // Read ECU identification
+            Logger.Log.WriteLine("Reading cluster identification...");
+            string ecuIdent;
+            try
+            {
+                var response = kwp2000.SendReceive(
+                    DiagnosticService.readEcuIdentification,
+                    new byte[] { 0x9B });
+                ecuIdent = Utils.DumpAscii(response.Body);
+                Logger.Log.WriteLine($"Cluster: {ecuIdent}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Log.WriteLine($"Failed to read cluster identification: {ex.Message}");
+                return;
+            }
+
+            // Parse part number to determine cluster type
+            var partNumberGroups = Tester.FindAndParsePartNumber(ecuIdent);
+            if (partNumberGroups.Length < 4)
+            {
+                Logger.Log.WriteLine($"Unable to parse part number from: {ecuIdent}");
+                return;
+            }
+
+            if (!ecuIdent.Contains("VDO") || partNumberGroups[1] != "920")
+            {
+                Logger.Log.WriteLine("CAN GetSKC currently only supports VDO CAN (920) clusters.");
+                Logger.Log.WriteLine($"Detected: {string.Join(" ", partNumberGroups)}");
+                return;
+            }
+
+            Logger.Log.WriteLine("VDO CAN cluster detected. Reading EEPROM...");
+
+            // Start diagnostic session for memory access
+            try
+            {
+                kwp2000.StartDiagnosticSession(0x84, 0x14);
+                Logger.Log.WriteLine("Diagnostic session started.");
+            }
+            catch (Exception ex)
+            {
+                Logger.Log.WriteLine($"Warning: Diagnostic session start failed: {ex.Message}");
+            }
+
+            // Read EEPROM region containing SKC (0x90 to 0x10C = 0x7C bytes)
+            const ushort startAddress = 0x90;
+            const byte length = 0x7C;
+
+            Logger.Log.WriteLine($"Reading EEPROM at 0x{startAddress:X4}, length 0x{length:X2}...");
+
+            var buffer = new byte[length];
+            int offset = 0;
+            const byte chunkSize = 32;
+
+            while (offset < length)
+            {
+                var readLen = (byte)Math.Min(chunkSize, length - offset);
+                var data = kwp2000.ReadMemoryByAddress((uint)(startAddress + offset), readLen);
+                Array.Copy(data, 0, buffer, offset, data.Length);
+                offset += data.Length;
+            }
+
+            var skc = VdoCluster.GetSkc(buffer, startAddress);
+            if (skc.HasValue)
+            {
+                Logger.Log.WriteLine($"SKC: {skc:D5}");
+            }
+            else
+            {
+                Logger.Log.WriteLine("Unable to determine SKC from EEPROM data.");
+            }
+        }
+        catch (NegativeResponseException ex)
+        {
+            Logger.Log.WriteLine($"Memory read rejected: {ex.Message}");
+            Logger.Log.WriteLine("Security access may be required. This is not yet implemented for CAN.");
+        }
+        catch (Exception ex)
+        {
+            Logger.Log.WriteLine($"CAN GetSKC failed: {ex.Message}");
+        }
+    }
+
     private static void ShowUsage()
     {
         Logger.Log.WriteLine("""
@@ -1014,6 +1135,8 @@ COMMAND =
         (Group 0: Raw controller data)
     CanAutoScan
         Scan CAN bus for all VW TP 2.0 modules (addresses 0x01-0x7F)
+    CanGetSkc
+        Read SKC/PIN code from instrument cluster over CAN bus (VDO CAN 920)
     CanMonitor
         Monitor CAN bus traffic (passive, press any key to stop)
     CanMulti

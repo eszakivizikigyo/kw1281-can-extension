@@ -56,7 +56,7 @@ public partial class CanDiagViewModel : ViewModelBase
 
             await Task.Run(() =>
             {
-                canInterface.SetCanSpeed(500);
+                canInterface.InitializeRawCan(500);
 
                 using var channel = new Tp20Channel(canInterface, address);
                 if (!channel.Open())
@@ -112,7 +112,7 @@ public partial class CanDiagViewModel : ViewModelBase
 
             await Task.Run(() =>
             {
-                canInterface.SetCanSpeed(500);
+                canInterface.InitializeRawCan(500);
 
                 using var channel = new Tp20Channel(canInterface, address);
                 if (!channel.Open())
@@ -154,7 +154,7 @@ public partial class CanDiagViewModel : ViewModelBase
 
             await Task.Run(() =>
             {
-                canInterface.SetCanSpeed(500);
+                canInterface.InitializeRawCan(500);
 
                 using var channel = new Tp20Channel(canInterface, address);
                 if (!channel.Open())
@@ -198,7 +198,7 @@ public partial class CanDiagViewModel : ViewModelBase
 
             await Task.Run(() =>
             {
-                canInterface.SetCanSpeed(500);
+                canInterface.InitializeRawCan(500);
 
                 using var channel = new Tp20Channel(canInterface, address);
                 if (!channel.Open())
@@ -242,7 +242,7 @@ public partial class CanDiagViewModel : ViewModelBase
 
             await Task.Run(() =>
             {
-                canInterface.SetCanSpeed(500);
+                canInterface.InitializeRawCan(500);
 
                 using var channel = new Tp20Channel(canInterface, address);
                 if (!channel.Open())
@@ -291,7 +291,7 @@ public partial class CanDiagViewModel : ViewModelBase
 
             await Task.Run(() =>
             {
-                canInterface.SetCanSpeed(500);
+                canInterface.InitializeRawCan(500);
 
                 using var channel = new Tp20Channel(canInterface, address);
                 if (!channel.Open())

@@ -63,7 +63,7 @@ public partial class CanMultiEcuViewModel : ViewModelBase
 
             await Task.Run(() =>
             {
-                canInterface.SetCanSpeed(500);
+                canInterface.InitializeRawCan(500);
 
                 using var router = new CanRouter(canInterface);
                 using var session = new Tp20Session(router);

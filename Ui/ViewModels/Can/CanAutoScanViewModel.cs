@@ -55,7 +55,7 @@ public partial class CanAutoScanViewModel : ViewModelBase
             var canInterface = _connectionService.CanInterface!;
             await Task.Run(() =>
             {
-                canInterface.SetCanSpeed(500);
+                canInterface.InitializeRawCan(500);
 
                 Logger.Log.WriteLine("=== CAN AutoScan ===");
                 Logger.Log.WriteLine("Scanning VW TP 2.0 addresses 0x01-0x7F...");

@@ -7,14 +7,22 @@ using System.Threading;
 namespace BitFab.KW1281Test.Interface
 {
     /// <summary>
-    /// CAN interface implementation for HEX-V2 and compatible adapters
-    /// Uses AT command protocol similar to ELM327
+    /// CAN interface for ELM327 and compatible adapters (ELM327, HEX-V2).
+    /// Supports two modes:
+    /// - OBD mode (default): standard ELM327 OBD-II protocol handling
+    /// - Raw CAN mode: direct CAN frame send/receive for VW TP 2.0 / UDS
     /// </summary>
     internal class CanInterface : IDisposable
     {
         private readonly SerialPort _port;
         private readonly object _lock = new object();
-        private bool _isInitialized = false;
+        private bool _isInitialized;
+        private bool _rawMode;
+        private uint _currentTxHeader = uint.MaxValue;
+        private readonly Queue<CanMessage> _frameBuffer = new();
+
+        /// <summary>Whether the interface is in raw CAN mode (ATCAF0 + ATH1).</summary>
+        public bool IsRawMode => _rawMode;
 
         public int ReadTimeout
         {
@@ -32,7 +40,7 @@ namespace BitFab.KW1281Test.Interface
         {
             _port = new SerialPort(portName)
             {
-                BaudRate = baudRate, // HEX-V2 typically uses 115200 for USB
+                BaudRate = baudRate,
                 DataBits = 8,
                 Parity = Parity.None,
                 StopBits = StopBits.One,
@@ -46,6 +54,12 @@ namespace BitFab.KW1281Test.Interface
 
             _port.Open();
             Thread.Sleep(100); // Allow interface to stabilize
+        }
+
+        // Internal constructor for unit testing (accepts pre-configured SerialPort)
+        internal CanInterface(SerialPort port)
+        {
+            _port = port;
         }
 
         public void Dispose()
@@ -66,7 +80,7 @@ namespace BitFab.KW1281Test.Interface
         }
 
         /// <summary>
-        /// Initialize the CAN interface with basic settings
+        /// Initialize the CAN interface with basic ELM327 settings.
         /// </summary>
         public bool Initialize()
         {
@@ -125,7 +139,91 @@ namespace BitFab.KW1281Test.Interface
         }
 
         /// <summary>
-        /// Set CAN bus speed
+        /// Initialize raw CAN mode for VW TP 2.0 and UDS communication.
+        /// Must be called after Initialize(). Enables direct CAN frame send/receive
+        /// by disabling ELM327's ISO-TP auto-formatting.
+        /// </summary>
+        /// <param name="speedKbps">CAN bus speed: 500 or 250 kbps</param>
+        public bool InitializeRawCan(int speedKbps = 500)
+        {
+            lock (_lock)
+            {
+                try
+                {
+                    Log.WriteLine($"Initializing raw CAN mode at {speedKbps} kbps...");
+
+                    // Set CAN protocol (11-bit IDs)
+                    string protocolCmd = speedKbps switch
+                    {
+                        500 => "ATSP6", // ISO 15765-4 CAN (11-bit, 500 kbps)
+                        250 => "ATSP8", // ISO 15765-4 CAN (11-bit, 250 kbps)
+                        _ => throw new ArgumentException($"Unsupported CAN speed: {speedKbps} kbps")
+                    };
+                    if (!SendCommand(protocolCmd))
+                    {
+                        Log.WriteLine("Failed to set CAN protocol");
+                        return false;
+                    }
+
+                    // Disable CAN Auto Formatting — raw byte mode, no ISO-TP interpretation
+                    if (!SendCommand("ATCAF0"))
+                    {
+                        Log.WriteLine("Failed to disable CAN auto formatting");
+                        return false;
+                    }
+
+                    // Show CAN headers (IDs) in responses
+                    if (!SendCommand("ATH1"))
+                    {
+                        Log.WriteLine("Failed to enable headers");
+                        return false;
+                    }
+
+                    // Disable adaptive timing for predictable behavior
+                    if (!SendCommand("ATAT0"))
+                    {
+                        Log.WriteLine("Failed to disable adaptive timing");
+                        return false;
+                    }
+
+                    // Set response timeout: 0x32 = 50 decimal → 50 × 4.096ms ≈ 200ms
+                    // This is the time ELM327 waits for CAN responses after sending a frame
+                    if (!SendCommand("ATST32"))
+                    {
+                        Log.WriteLine("Failed to set timeout");
+                        return false;
+                    }
+
+                    // Disable DLC display
+                    if (!SendCommand("ATD0"))
+                    {
+                        Log.WriteLine("Failed to disable DLC display");
+                        return false;
+                    }
+
+                    // Clear any receive address filter (receive from all IDs)
+                    if (!SendCommand("ATAR"))
+                    {
+                        Log.WriteLine("Failed to clear receive filter");
+                        return false;
+                    }
+
+                    _rawMode = true;
+                    _currentTxHeader = uint.MaxValue;
+                    _frameBuffer.Clear();
+                    Log.WriteLine("Raw CAN mode initialized successfully");
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    Log.WriteLine($"Failed to initialize raw CAN mode: {ex.Message}");
+                    return false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Set CAN bus speed (OBD mode only).
         /// </summary>
         /// <param name="speed">Speed in kbps (e.g., 500 for 500kbps)</param>
         public bool SetCanSpeed(int speed)
@@ -133,11 +231,27 @@ namespace BitFab.KW1281Test.Interface
             string command = speed switch
             {
                 500 => "ATSP6", // CAN 500kbps, 11-bit ID
-                250 => "ATSP7", // CAN 250kbps, 11-bit ID
+                250 => "ATSP8", // CAN 250kbps, 11-bit ID
                 _ => throw new ArgumentException($"Unsupported CAN speed: {speed}kbps")
             };
 
             return SendCommand(command);
+        }
+
+        /// <summary>
+        /// Set CAN receive address filter. When set, only frames with matching
+        /// CAN IDs are received. Pass null to clear the filter (receive all).
+        /// </summary>
+        public bool SetRxFilter(uint? canId)
+        {
+            if (canId.HasValue)
+            {
+                return SendCommand($"ATCRA{canId.Value:X3}");
+            }
+            else
+            {
+                return SendCommand("ATAR");
+            }
         }
 
         /// <summary>
@@ -165,9 +279,9 @@ namespace BitFab.KW1281Test.Interface
         }
 
         /// <summary>
-        /// Send an AT command and wait for OK response
+        /// Send an AT command and wait for OK response.
         /// </summary>
-        private bool SendCommand(string command)
+        internal bool SendCommand(string command)
         {
             lock (_lock)
             {
@@ -198,7 +312,8 @@ namespace BitFab.KW1281Test.Interface
         }
 
         /// <summary>
-        /// Read response from the interface until prompt character '>'
+        /// Read response from the interface until prompt character '>'.
+        /// Returns a single string (lines joined, whitespace stripped).
         /// </summary>
         private string ReadResponse()
         {
@@ -236,7 +351,66 @@ namespace BitFab.KW1281Test.Interface
         }
 
         /// <summary>
-        /// Send a CAN message
+        /// Read response from the interface until prompt '>', preserving line boundaries.
+        /// Each non-empty line is returned as a separate string.
+        /// Used in raw CAN mode where multiple CAN frames may appear in one response.
+        /// </summary>
+        private List<string> ReadResponseLines(int? timeoutMs = null)
+        {
+            var lines = new List<string>();
+            var sb = new StringBuilder();
+            var timeout = timeoutMs ?? ReadTimeout;
+            var endTime = DateTime.Now.AddMilliseconds(timeout);
+
+            while (DateTime.Now < endTime)
+            {
+                try
+                {
+                    if (_port.BytesToRead > 0)
+                    {
+                        var ch = (char)_port.ReadChar();
+                        if (ch == '>')
+                        {
+                            break;
+                        }
+                        if (ch == '\r' || ch == '\n')
+                        {
+                            var line = sb.ToString().Trim();
+                            if (line.Length > 0)
+                            {
+                                lines.Add(line);
+                            }
+                            sb.Clear();
+                        }
+                        else if (ch != '\0')
+                        {
+                            sb.Append(ch);
+                        }
+                    }
+                    else
+                    {
+                        Thread.Sleep(5);
+                    }
+                }
+                catch (TimeoutException)
+                {
+                    break;
+                }
+            }
+
+            // Capture any remaining text
+            var lastLine = sb.ToString().Trim();
+            if (lastLine.Length > 0)
+            {
+                lines.Add(lastLine);
+            }
+
+            return lines;
+        }
+
+        /// <summary>
+        /// Send a CAN message. In raw mode, sets the TX header and sends data bytes.
+        /// Any CAN frames received as a response are buffered for later retrieval.
         /// </summary>
         public bool SendCanMessage(CanMessage message)
         {
@@ -244,8 +418,12 @@ namespace BitFab.KW1281Test.Interface
             {
                 try
                 {
-                    // Format: [ID] [Data bytes]
-                    // Example: 7DF 02 01 00
+                    if (_rawMode)
+                    {
+                        return SendCanMessageRaw(message);
+                    }
+
+                    // OBD mode: format as [ID][Data]
                     var idStr = message.IsExtended ? $"{message.Id:X8}" : $"{message.Id:X3}";
                     var dataStr = BitConverter.ToString(message.Data).Replace("-", "");
                     var command = $"{idStr}{dataStr}";
@@ -265,12 +443,74 @@ namespace BitFab.KW1281Test.Interface
         }
 
         /// <summary>
-        /// Receive a CAN message
+        /// Send a CAN message in raw mode. Sets ATSH header if changed, sends data,
+        /// and buffers any received response frames.
+        /// </summary>
+        private bool SendCanMessageRaw(CanMessage message)
+        {
+            // Set TX CAN ID header if it changed since last send
+            if (message.Id != _currentTxHeader)
+            {
+                var headerCmd = message.IsExtended
+                    ? $"ATSH{message.Id:X8}"
+                    : $"ATSH{message.Id:X3}";
+
+                _port.DiscardInBuffer();
+                _port.WriteLine(headerCmd);
+                var headerResp = ReadResponse();
+                if (!headerResp.Contains("OK"))
+                {
+                    Log.WriteLine($"Failed to set TX header: {headerResp}");
+                    return false;
+                }
+                _currentTxHeader = message.Id;
+            }
+
+            // Send raw data bytes (ELM327 requires at least 1 byte)
+            var dataStr = message.DataLength > 0
+                ? BitConverter.ToString(message.Data).Replace("-", "")
+                : "00";
+
+            Log.WriteLine($"TX raw CAN: ID=0x{message.Id:X3} [{message.DataLength}] {dataStr}");
+            _port.DiscardInBuffer();
+            _port.WriteLine(dataStr);
+
+            // Read response lines — may contain CAN frames, "NO DATA", or errors
+            var lines = ReadResponseLines();
+
+            foreach (var line in lines)
+            {
+                if (line.Contains("?") || line.Contains("ERROR") || line.Contains("CAN ERROR"))
+                {
+                    Log.WriteLine($"CAN send error: {line}");
+                    return false;
+                }
+            }
+
+            // Buffer any received CAN frames from the response
+            BufferReceivedFrames(lines);
+            return true;
+        }
+
+        /// <summary>
+        /// Receive a CAN message. In raw mode, first checks the frame buffer,
+        /// then uses ATMA monitor mode to passively listen for incoming frames.
         /// </summary>
         public CanMessage? ReceiveCanMessage(int timeoutMs = 1000)
         {
             lock (_lock)
             {
+                // Check the frame buffer first (frames captured during sends)
+                if (_frameBuffer.Count > 0)
+                {
+                    return _frameBuffer.Dequeue();
+                }
+
+                if (_rawMode)
+                {
+                    return ReceiveCanMessageRaw(timeoutMs);
+                }
+
                 try
                 {
                     var oldTimeout = _port.ReadTimeout;
@@ -301,6 +541,128 @@ namespace BitFab.KW1281Test.Interface
                 }
             }
         }
+
+        /// <summary>
+        /// Receive CAN frames in raw mode using ATMA (Monitor All).
+        /// Enters monitor mode, reads frames until at least one is captured
+        /// or timeout expires, then exits monitor mode.
+        /// </summary>
+        private CanMessage? ReceiveCanMessageRaw(int timeoutMs)
+        {
+            try
+            {
+                _port.DiscardInBuffer();
+                _port.Write("ATMA\r");
+
+                var sb = new StringBuilder();
+                var endTime = DateTime.Now.AddMilliseconds(timeoutMs);
+
+                while (DateTime.Now < endTime)
+                {
+                    if (_port.BytesToRead > 0)
+                    {
+                        var ch = (char)_port.ReadChar();
+                        if (ch == '\r' || ch == '\n')
+                        {
+                            var line = sb.ToString().Trim();
+                            sb.Clear();
+
+                            if (string.IsNullOrEmpty(line) ||
+                                line.Contains("SEARCHING") ||
+                                line.Contains("ATMA") ||
+                                line.Contains("STOPPED"))
+                            {
+                                continue;
+                            }
+
+                            var msg = ParseCanMessage(line);
+                            if (msg != null)
+                            {
+                                // Got a frame — exit monitor mode and return it
+                                ExitMonitorMode();
+                                return msg;
+                            }
+                        }
+                        else if (ch != '\0' && ch != '>')
+                        {
+                            sb.Append(ch);
+                        }
+                    }
+                    else
+                    {
+                        Thread.Sleep(5);
+                    }
+                }
+
+                // Timeout — exit monitor mode
+                ExitMonitorMode();
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Log.WriteLine($"Error in raw CAN receive: {ex.Message}");
+                try { ExitMonitorMode(); } catch { }
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Exit ATMA monitor mode by sending a character and waiting for prompt.
+        /// </summary>
+        private void ExitMonitorMode()
+        {
+            _port.Write("\r");
+            // Wait for '>' prompt with short timeout
+            var endTime = DateTime.Now.AddMilliseconds(500);
+            while (DateTime.Now < endTime)
+            {
+                if (_port.BytesToRead > 0)
+                {
+                    var ch = (char)_port.ReadChar();
+                    if (ch == '>')
+                    {
+                        break;
+                    }
+                }
+                else
+                {
+                    Thread.Sleep(5);
+                }
+            }
+            _port.DiscardInBuffer();
+        }
+
+        /// <summary>
+        /// Parse response lines into CAN messages and add them to the frame buffer.
+        /// Skips non-frame lines like "NO DATA", "OK", "SEARCHING", etc.
+        /// </summary>
+        internal void BufferReceivedFrames(List<string> lines)
+        {
+            foreach (var line in lines)
+            {
+                if (string.IsNullOrWhiteSpace(line) ||
+                    line.Contains("NO DATA") ||
+                    line.Contains("OK") ||
+                    line.Contains("SEARCHING") ||
+                    line.Contains("STOPPED") ||
+                    line.Contains("?"))
+                {
+                    continue;
+                }
+
+                var msg = ParseCanMessage(line);
+                if (msg != null)
+                {
+                    _frameBuffer.Enqueue(msg);
+                    Log.WriteLine($"RX buffered: {msg}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Number of CAN frames currently in the receive buffer.
+        /// </summary>
+        public int BufferedFrameCount => _frameBuffer.Count;
 
         /// <summary>
         /// Parse a CAN message from string response.
@@ -412,13 +774,24 @@ namespace BitFab.KW1281Test.Interface
         }
 
         /// <summary>
-        /// Clear receive buffer
+        /// Set the ELM327 response timeout (ATST).
+        /// Timeout in CAN mode ≈ value × 4.096ms.
+        /// Example: 0x32 (50) → ~200ms, 0xFF (255) → ~1044ms.
+        /// </summary>
+        public bool SetResponseTimeout(byte value)
+        {
+            return SendCommand($"ATST{value:X2}");
+        }
+
+        /// <summary>
+        /// Clear receive buffer (both serial port and frame buffer).
         /// </summary>
         public void ClearReceiveBuffer()
         {
             lock (_lock)
             {
                 _port.DiscardInBuffer();
+                _frameBuffer.Clear();
             }
         }
     }

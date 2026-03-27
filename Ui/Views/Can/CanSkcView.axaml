@@ -1,0 +1,30 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:BitFab.KW1281Test.Ui.ViewModels.Can"
+             x:Class="BitFab.KW1281Test.Ui.Views.Can.CanSkcView"
+             x:DataType="vm:CanSkcViewModel">
+
+  <DockPanel Margin="16">
+    <TextBlock DockPanel.Dock="Top" Text="CAN SKC / PIN Code" FontSize="20" FontWeight="Bold" Margin="0,0,0,12"/>
+
+    <StackPanel DockPanel.Dock="Top" Spacing="8" MaxWidth="500" HorizontalAlignment="Left">
+      <TextBlock Text="Read the SKC (Secret Key Code) from VDO CAN instrument clusters via TP 2.0."
+                 TextWrapping="Wrap" Margin="0,0,0,8"
+                 Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"/>
+
+      <WrapPanel Orientation="Horizontal">
+        <Button Content="Read Cluster Info" Command="{Binding ReadClusterInfoCommand}" Margin="0,0,8,8"/>
+        <Button Content="Get SKC" Command="{Binding GetSkcCommand}" Classes="accent" Margin="0,0,8,8"/>
+      </WrapPanel>
+
+      <TextBlock Text="{Binding ClusterInfo}" FontFamily="Consolas" Margin="0,4,0,0"
+                 IsVisible="{Binding ClusterInfo, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+
+      <TextBlock Text="{Binding SkcResult}" FontSize="18" FontWeight="Bold" Margin="0,8,0,0"
+                 IsVisible="{Binding SkcResult, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+
+      <TextBlock Text="{Binding StatusText}" FontStyle="Italic" Margin="0,8,0,0"
+                 Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"/>
+    </StackPanel>
+  </DockPanel>
+</UserControl>

@@ -131,4 +131,95 @@ public class CanInterfaceTests
         Assert.AreEqual(0x7E8u, msg.Id);
         CollectionAssert.AreEqual(new byte[] { 0x04, 0x41, 0x0C, 0x1A, 0xF8 }, msg.Data);
     }
+
+    // --- Raw CAN mode: TP 2.0 frame parsing ---
+
+    [TestMethod]
+    public void ParseCanMessage_Compact_Tp20ChannelSetupResponse()
+    {
+        // TP 2.0 channel setup response: ID=0x201, 7 data bytes
+        // Byte 0: module addr, Byte 1: 0xD0 (setup response), Bytes 2-5: CAN IDs, Byte 6: app type
+        var msg = CanInterface.ParseCanMessage("2010100030003000100");
+        Assert.IsNotNull(msg);
+        Assert.AreEqual(0x201u, msg.Id);
+        Assert.IsFalse(msg.IsExtended);
+        Assert.AreEqual(8, msg.DataLength);
+        Assert.AreEqual(0x01, msg.Data[0]); // Module address
+    }
+
+    [TestMethod]
+    public void ParseCanMessage_Compact_Tp20DataFrame()
+    {
+        // TP 2.0 data frame on dynamic channel: ID=0x300, 8 data bytes
+        // Header byte 0x10 = WaitingForAck_MoreToFollow, seq 0
+        var msg = CanInterface.ParseCanMessage("300101A9B0000000000");
+        Assert.IsNotNull(msg);
+        Assert.AreEqual(0x300u, msg.Id);
+        Assert.AreEqual(8, msg.DataLength);
+        Assert.AreEqual(0x10, msg.Data[0]); // TP 2.0 header: WaitForAck + seq 0
+    }
+
+    [TestMethod]
+    public void ParseCanMessage_Compact_Tp20Ack()
+    {
+        // TP 2.0 ACK frame: ID=0x300, header byte 0xB1 (Ack_Ready, next seq 1)
+        var msg = CanInterface.ParseCanMessage("300B100000000000000");
+        Assert.IsNotNull(msg);
+        Assert.AreEqual(0x300u, msg.Id);
+        Assert.AreEqual(8, msg.DataLength);
+        Assert.AreEqual(0xB1, msg.Data[0]); // ACK ready, expect seq 1
+    }
+
+    // --- BufferReceivedFrames ---
+
+    [TestMethod]
+    public void BufferReceivedFrames_ParsesMultipleFrames()
+    {
+        using var canInterface = CreateTestCanInterface();
+
+        var lines = new List<string>
+        {
+            "300B100000000000000",  // ACK frame (8 bytes)
+            "300101A9B0000000000",   // Data frame (8 bytes)
+        };
+
+        canInterface.BufferReceivedFrames(lines);
+        Assert.AreEqual(2, canInterface.BufferedFrameCount);
+    }
+
+    [TestMethod]
+    public void BufferReceivedFrames_SkipsNonFrameLines()
+    {
+        using var canInterface = CreateTestCanInterface();
+
+        var lines = new List<string>
+        {
+            "NO DATA",
+            "OK",
+            "SEARCHING...",
+            "STOPPED",
+            "?",
+            "",
+            "300B100000000000000",  // Only valid frame (8 bytes)
+        };
+
+        canInterface.BufferReceivedFrames(lines);
+        Assert.AreEqual(1, canInterface.BufferedFrameCount);
+    }
+
+    [TestMethod]
+    public void BufferReceivedFrames_EmptyList_NoFrames()
+    {
+        using var canInterface = CreateTestCanInterface();
+
+        canInterface.BufferReceivedFrames(new List<string>());
+        Assert.AreEqual(0, canInterface.BufferedFrameCount);
+    }
+
+    // Helper: create CanInterface without opening a real serial port
+    private static CanInterface CreateTestCanInterface()
+    {
+        // Use internal constructor with null-safe pattern for unit testing
+        return new CanInterface(new System.IO.Ports.SerialPort());
+    }
 }

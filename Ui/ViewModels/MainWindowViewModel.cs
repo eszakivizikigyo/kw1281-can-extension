@@ -95,6 +95,7 @@ public partial class MainWindowViewModel : ViewModelBase
         "Can.AutoScan"      => new CanAutoScanViewModel(_connectionService),
         "Can.Diag"          => new CanDiagViewModel(_connectionService),
         "Can.MultiEcu"      => new CanMultiEcuViewModel(_connectionService),
+        "Can.Skc"           => new CanSkcViewModel(_connectionService),
         _ => null,
     };
 
@@ -149,6 +150,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     new NavigationItem { Title = "Auto Scan", Tag = "Can.AutoScan" },
                     new NavigationItem { Title = "Diagnostics", Tag = "Can.Diag" },
                     new NavigationItem { Title = "Multi-ECU", Tag = "Can.MultiEcu" },
+                    new NavigationItem { Title = "SKC / PIN", Tag = "Can.Skc" },
                 ]
             }
         ];
