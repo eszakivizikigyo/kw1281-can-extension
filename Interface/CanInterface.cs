@@ -265,8 +265,9 @@ namespace BitFab.KW1281Test.Interface
 
         /// <summary>
         /// Verify that the adapter can actually send raw CAN data.
-        /// Sends a test byte on an unused CAN ID (0x7FF) and checks whether
-        /// the adapter accepts it (response is NOT "?").
+        /// Sends a full 8-byte test frame on an unused CAN ID (0x7FF) and checks
+        /// whether the adapter accepts it (response is NOT "?").
+        /// Many cheap ELM327 v1.5 clones accept ATCAF0 but reject actual raw data sends.
         /// </summary>
         private bool VerifyRawCanSend()
         {
@@ -275,24 +276,28 @@ namespace BitFab.KW1281Test.Interface
                 // Set TX header to an unused/safe CAN ID
                 _port.DiscardInBuffer();
                 _port.DiscardOutBuffer();
+                Log.WriteLine("Verify: sending ATSH7FF");
                 _port.WriteLine("ATSH7FF");
                 var headerResp = ReadResponse();
+                Log.WriteLine($"Verify: ATSH7FF response: {headerResp}");
                 if (!headerResp.Contains("OK"))
                     return false;
 
-                // Send a single test byte
+                // Send a full 8-byte test frame (same size as TP 2.0 frames)
                 _port.DiscardInBuffer();
-                _port.WriteLine("00");
+                Log.WriteLine("Verify: sending 8-byte test frame");
+                _port.WriteLine("0000000000000000");
                 var sendResp = ReadResponse();
+                Log.WriteLine($"Verify: test frame response: {sendResp}");
 
                 // Reset TX header state for subsequent use
                 _currentTxHeader = uint.MaxValue;
                 _frameBuffer.Clear();
 
-                // "?" means the adapter doesn't understand raw data send → fail
+                // "?" means the adapter doesn't understand raw data send -> fail
                 if (sendResp.Contains("?"))
                 {
-                    Log.WriteLine("Adapter rejected raw data send");
+                    Log.WriteLine("Adapter rejected raw 8-byte data send");
                     return false;
                 }
 
@@ -303,8 +308,9 @@ namespace BitFab.KW1281Test.Interface
                 _rawMode = true;
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                Log.WriteLine($"Verify raw CAN failed: {ex.Message}");
                 return false;
             }
         }

@@ -63,7 +63,8 @@ public partial class CanMultiEcuViewModel : ViewModelBase
 
             await Task.Run(() =>
             {
-                canInterface.InitializeRawCan(500);
+                if (!canInterface.InitializeRawCan(500))
+                    throw new InvalidOperationException("This adapter does not support raw CAN mode.");
 
                 using var router = new CanRouter(canInterface);
                 using var session = new Tp20Session(router);

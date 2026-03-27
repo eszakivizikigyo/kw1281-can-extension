@@ -55,7 +55,12 @@ public partial class CanAutoScanViewModel : ViewModelBase
             var canInterface = _connectionService.CanInterface!;
             await Task.Run(() =>
             {
-                canInterface.InitializeRawCan(500);
+                if (!canInterface.InitializeRawCan(500))
+                {
+                    Logger.Log.WriteLine("Raw CAN initialization failed — scan aborted");
+                    throw new InvalidOperationException(
+                        "This adapter does not support raw CAN mode. Use a genuine ELM327 v2.x, OBDLink, or STN1110-based adapter.");
+                }
 
                 Logger.Log.WriteLine("=== CAN AutoScan ===");
                 Logger.Log.WriteLine("Scanning VW TP 2.0 addresses 0x01-0x7F...");

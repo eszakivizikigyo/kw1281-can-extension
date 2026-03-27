@@ -56,7 +56,8 @@ public partial class CanDiagViewModel : ViewModelBase
 
             await Task.Run(() =>
             {
-                canInterface.InitializeRawCan(500);
+                if (!canInterface.InitializeRawCan(500))
+                    throw new InvalidOperationException("This adapter does not support raw CAN mode.");
 
                 using var channel = new Tp20Channel(canInterface, address);
                 if (!channel.Open())
@@ -112,7 +113,8 @@ public partial class CanDiagViewModel : ViewModelBase
 
             await Task.Run(() =>
             {
-                canInterface.InitializeRawCan(500);
+                if (!canInterface.InitializeRawCan(500))
+                    throw new InvalidOperationException("This adapter does not support raw CAN mode.");
 
                 using var channel = new Tp20Channel(canInterface, address);
                 if (!channel.Open())
@@ -154,7 +156,8 @@ public partial class CanDiagViewModel : ViewModelBase
 
             await Task.Run(() =>
             {
-                canInterface.InitializeRawCan(500);
+                if (!canInterface.InitializeRawCan(500))
+                    throw new InvalidOperationException("This adapter does not support raw CAN mode.");
 
                 using var channel = new Tp20Channel(canInterface, address);
                 if (!channel.Open())
@@ -198,7 +201,8 @@ public partial class CanDiagViewModel : ViewModelBase
 
             await Task.Run(() =>
             {
-                canInterface.InitializeRawCan(500);
+                if (!canInterface.InitializeRawCan(500))
+                    throw new InvalidOperationException("This adapter does not support raw CAN mode.");
 
                 using var channel = new Tp20Channel(canInterface, address);
                 if (!channel.Open())
@@ -242,7 +246,8 @@ public partial class CanDiagViewModel : ViewModelBase
 
             await Task.Run(() =>
             {
-                canInterface.InitializeRawCan(500);
+                if (!canInterface.InitializeRawCan(500))
+                    throw new InvalidOperationException("This adapter does not support raw CAN mode.");
 
                 using var channel = new Tp20Channel(canInterface, address);
                 if (!channel.Open())
@@ -291,7 +296,8 @@ public partial class CanDiagViewModel : ViewModelBase
 
             await Task.Run(() =>
             {
-                canInterface.InitializeRawCan(500);
+                if (!canInterface.InitializeRawCan(500))
+                    throw new InvalidOperationException("This adapter does not support raw CAN mode.");
 
                 using var channel = new Tp20Channel(canInterface, address);
                 if (!channel.Open())
