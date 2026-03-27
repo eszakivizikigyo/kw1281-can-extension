@@ -165,6 +165,7 @@ namespace BitFab.KW1281Test.Interface
         /// Initialize raw CAN mode for VW TP 2.0 and UDS communication.
         /// Must be called after Initialize(). Enables direct CAN frame send/receive
         /// by disabling ELM327's ISO-TP auto-formatting.
+        /// Tries ATCAF0 first, then Protocol B as fallback.
         /// </summary>
         /// <param name="speedKbps">CAN bus speed: 500 or 250 kbps</param>
         public bool InitializeRawCan(int speedKbps = 500)
@@ -175,73 +176,136 @@ namespace BitFab.KW1281Test.Interface
                 {
                     Log.WriteLine($"Initializing raw CAN mode at {speedKbps} kbps...");
 
-                    // Set CAN protocol (11-bit IDs)
-                    string protocolCmd = speedKbps switch
+                    // Method 1: Standard protocol + ATCAF0
+                    if (TryInitRawCan_Atcaf0(speedKbps))
                     {
-                        500 => "ATSP6", // ISO 15765-4 CAN (11-bit, 500 kbps)
-                        250 => "ATSP8", // ISO 15765-4 CAN (11-bit, 250 kbps)
-                        _ => throw new ArgumentException($"Unsupported CAN speed: {speedKbps} kbps")
-                    };
-                    if (!SendCommand(protocolCmd))
-                    {
-                        Log.WriteLine("Failed to set CAN protocol");
-                        return false;
+                        Log.WriteLine("Raw CAN mode initialized (ATCAF0)");
+                        return true;
                     }
 
-                    // Disable CAN Auto Formatting — raw byte mode, no ISO-TP interpretation
-                    if (!SendCommand("ATCAF0"))
+                    // Method 2: Protocol B (custom CAN with CAF off built-in)
+                    Log.WriteLine("ATCAF0 raw mode not functional, trying Protocol B...");
+                    if (TryInitRawCan_ProtocolB(speedKbps))
                     {
-                        Log.WriteLine("Failed to disable CAN auto formatting");
-                        return false;
+                        Log.WriteLine("Raw CAN mode initialized (Protocol B)");
+                        return true;
                     }
 
-                    // Show CAN headers (IDs) in responses
-                    if (!SendCommand("ATH1"))
-                    {
-                        Log.WriteLine("Failed to enable headers");
-                        return false;
-                    }
-
-                    // Disable adaptive timing for predictable behavior
-                    if (!SendCommand("ATAT0"))
-                    {
-                        Log.WriteLine("Failed to disable adaptive timing");
-                        return false;
-                    }
-
-                    // Set response timeout: 0x32 = 50 decimal → 50 × 4.096ms ≈ 200ms
-                    // This is the time ELM327 waits for CAN responses after sending a frame
-                    if (!SendCommand("ATST32"))
-                    {
-                        Log.WriteLine("Failed to set timeout");
-                        return false;
-                    }
-
-                    // Disable DLC display
-                    if (!SendCommand("ATD0"))
-                    {
-                        Log.WriteLine("Failed to disable DLC display");
-                        return false;
-                    }
-
-                    // Clear any receive address filter (receive from all IDs)
-                    if (!SendCommand("ATAR"))
-                    {
-                        Log.WriteLine("Failed to clear receive filter");
-                        return false;
-                    }
-
-                    _rawMode = true;
-                    _currentTxHeader = uint.MaxValue;
-                    _frameBuffer.Clear();
-                    Log.WriteLine("Raw CAN mode initialized successfully");
-                    return true;
+                    // Both methods failed
+                    Log.WriteLine("This adapter does not support raw CAN communication.");
+                    Log.WriteLine("VW TP 2.0 / UDS require raw CAN support.");
+                    Log.WriteLine("Recommended adapters:");
+                    Log.WriteLine("  - Genuine ELM327 v2.x");
+                    Log.WriteLine("  - OBDLink SX / MX / EX");
+                    Log.WriteLine("  - STN1110 / STN2120 based adapter");
+                    return false;
                 }
                 catch (Exception ex)
                 {
                     Log.WriteLine($"Failed to initialize raw CAN mode: {ex.Message}");
                     return false;
                 }
+            }
+        }
+
+        /// <summary>
+        /// Try raw CAN via standard CAN protocol (6/8) + ATCAF0 to disable ISO-TP framing.
+        /// </summary>
+        private bool TryInitRawCan_Atcaf0(int speedKbps)
+        {
+            string protocolCmd = speedKbps switch
+            {
+                500 => "ATSP6",
+                250 => "ATSP8",
+                _ => throw new ArgumentException($"Unsupported CAN speed: {speedKbps} kbps")
+            };
+
+            if (!SendCommand(protocolCmd)) return false;
+            if (!SendCommand("ATCAF0")) return false;
+            if (!SetRawCanParameters()) return false;
+
+            return VerifyRawCanSend();
+        }
+
+        /// <summary>
+        /// Try raw CAN via Protocol B with explicit CAF-off and speed parameters.
+        /// Protocol B is a user-defined CAN protocol supported by some ELM327 adapters.
+        /// </summary>
+        private bool TryInitRawCan_ProtocolB(int speedKbps)
+        {
+            // Protocol B parameters (ATPB xxyy):
+            //   xx = PP 2C: bit7=CAF(0=off), bit4=ID len(0=11bit) → 0x00
+            //   yy = PP 2D: CAN baud divisor (500000/speed) → 0x01 for 500k, 0x02 for 250k
+            byte speedDivisor = speedKbps switch
+            {
+                500 => 0x01,
+                250 => 0x02,
+                _ => throw new ArgumentException($"Unsupported CAN speed: {speedKbps} kbps")
+            };
+
+            if (!SendCommand($"ATPB00{speedDivisor:X2}")) return false;
+            if (!SendCommand("ATSPB")) return false;
+            if (!SetRawCanParameters()) return false;
+
+            return VerifyRawCanSend();
+        }
+
+        /// <summary>
+        /// Set common raw CAN parameters (headers, timing, DLC, filters).
+        /// </summary>
+        private bool SetRawCanParameters()
+        {
+            if (!SendCommand("ATH1")) return false;   // Show CAN headers in responses
+            if (!SendCommand("ATAT0")) return false;  // Disable adaptive timing
+            if (!SendCommand("ATST32")) return false;  // Response timeout ~200ms
+            if (!SendCommand("ATD0")) return false;    // Disable DLC display
+            if (!SendCommand("ATAR")) return false;    // Clear receive address filter
+            return true;
+        }
+
+        /// <summary>
+        /// Verify that the adapter can actually send raw CAN data.
+        /// Sends a test byte on an unused CAN ID (0x7FF) and checks whether
+        /// the adapter accepts it (response is NOT "?").
+        /// </summary>
+        private bool VerifyRawCanSend()
+        {
+            try
+            {
+                // Set TX header to an unused/safe CAN ID
+                _port.DiscardInBuffer();
+                _port.DiscardOutBuffer();
+                _port.WriteLine("ATSH7FF");
+                var headerResp = ReadResponse();
+                if (!headerResp.Contains("OK"))
+                    return false;
+
+                // Send a single test byte
+                _port.DiscardInBuffer();
+                _port.WriteLine("00");
+                var sendResp = ReadResponse();
+
+                // Reset TX header state for subsequent use
+                _currentTxHeader = uint.MaxValue;
+                _frameBuffer.Clear();
+
+                // "?" means the adapter doesn't understand raw data send → fail
+                if (sendResp.Contains("?"))
+                {
+                    Log.WriteLine("Adapter rejected raw data send");
+                    return false;
+                }
+
+                // "CAN ERROR" = raw mode works but no bus ACK (adapter not connected to car)
+                // "NO DATA" = frame sent and ACKed but no response — normal
+                // Actual hex data = frame sent and response received
+                // All of these mean raw CAN works
+                _rawMode = true;
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
 
