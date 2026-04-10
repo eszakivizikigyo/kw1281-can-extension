@@ -292,6 +292,10 @@ class Program
             case "cangetskc":
                 CanGetSkc(portName, baudRate);
                 return;
+
+            case "candiag":
+                CanDiagnoseTp20(portName, baudRate);
+                return;
         }
 
         using var @interface = InterfaceFactory.OpenPort(portName, baudRate);
@@ -778,6 +782,304 @@ class Program
         }
     }
 
+    /// <summary>
+    /// Diagnostic tool for TP 2.0 channel setup debugging.
+    /// Phase 1: Passive CAN monitor (3s) to see what's alive on the bus
+    /// Phase 2: Send TP 2.0 channel setup requests and monitor ALL CAN traffic for responses
+    /// Phase 3: Try STN1170 STPX command for single-shot send+receive
+    /// </summary>
+    private static void CanDiagnoseTp20(string portName, int baudRate)
+    {
+        Logger.Log.WriteLine("=== TP 2.0 Diagnostic Tool ===");
+        Logger.Log.WriteLine($"Port: {portName}, Baud: {baudRate}");
+        Logger.Log.WriteLine();
+
+        try
+        {
+            using var canInterface = new CanInterface(portName, baudRate);
+
+            if (!canInterface.Initialize())
+            {
+                Logger.Log.WriteLine("FAIL: Cannot initialize CAN interface");
+                return;
+            }
+
+            if (!canInterface.InitializeRawCan(500))
+            {
+                Logger.Log.WriteLine("FAIL: Cannot initialize raw CAN mode");
+                return;
+            }
+
+            // === Phase 1: Passive Monitor ===
+            Logger.Log.WriteLine("--- Phase 1: Passive CAN monitor (3 seconds) ---");
+            Logger.Log.WriteLine("Listening for all CAN traffic...");
+
+            var seenIds = new Dictionary<uint, int>();
+            var startTime = DateTime.Now;
+            var phase1Duration = TimeSpan.FromSeconds(3);
+
+            while (DateTime.Now - startTime < phase1Duration)
+            {
+                var msg = canInterface.ReceiveCanMessage(500);
+                if (msg != null)
+                {
+                    if (seenIds.ContainsKey(msg.Id))
+                        seenIds[msg.Id]++;
+                    else
+                        seenIds[msg.Id] = 1;
+                }
+            }
+
+            if (seenIds.Count == 0)
+            {
+                Logger.Log.WriteLine("WARNING: No CAN traffic detected! Is the ignition on?");
+            }
+            else
+            {
+                Logger.Log.WriteLine($"Detected {seenIds.Count} unique CAN IDs:");
+                foreach (var (id, count) in seenIds.OrderBy(kv => kv.Key))
+                {
+                    var label = id switch
+                    {
+                        >= 0x200 and <= 0x27F => $" (TP2.0 setup range, module 0x{id - 0x200:X2})",
+                        >= 0x280 and <= 0x2FF => " (TP2.0 dynamic range)",
+                        >= 0x300 and <= 0x3FF => " (TP2.0 dynamic range)",
+                        0x7DF => " (OBD broadcast)",
+                        >= 0x7E0 and <= 0x7E7 => $" (UDS request 0x{id:X3})",
+                        >= 0x7E8 and <= 0x7EF => $" (UDS response 0x{id:X3})",
+                        _ => ""
+                    };
+                    Logger.Log.WriteLine($"  0x{id:X3}: {count} frames{label}");
+                }
+            }
+
+            // === Phase 2: TP 2.0 Channel Setup with full monitoring ===
+            Logger.Log.WriteLine();
+            Logger.Log.WriteLine("--- Phase 2: TP 2.0 Channel Setup Requests ---");
+            Logger.Log.WriteLine("Sending setup request to 0x200 and monitoring ALL responses...");
+
+            // Target modules to test
+            var targets = new (byte Address, string Name)[]
+            {
+                (0x01, "Engine/Gateway"),
+                (0x02, "Transmission"),
+                (0x03, "ABS/ESP"),
+                (0x09, "Central Electronics"),
+                (0x15, "Airbag"),
+                (0x17, "Instrument Cluster"),
+                (0x19, "CAN Gateway"),
+                (0x46, "Central Comfort"),
+                (0x56, "Radio"),
+            };
+
+            foreach (var (address, name) in targets)
+            {
+                Logger.Log.WriteLine();
+                Logger.Log.WriteLine($"--- Module 0x{address:X2} ({name}) ---");
+
+                // Build TP 2.0 channel setup request
+                // Target CAN ID: always 0x200
+                // Expected response CAN ID: 0x200 + address
+                var expectedResponseId = 0x200u + address;
+
+                var setupData = new byte[]
+                {
+                    address,
+                    0xC0,       // ChannelSetupRequest opcode
+                    0x00, 0x10, // RX_VALID: let module decide
+                    0x00, 0x03, // TX_VALID: suggest 0x300 range
+                    0x01,       // Application: KWP2000 diagnostics
+                    0x00        // Padding to 8 bytes
+                };
+
+                // Clear buffers, set TX header to 0x200
+                canInterface.ClearReceiveBuffer();
+
+                // Send the frame and immediately monitor for response
+                var setupMsg = new CanMessage(0x200, setupData);
+                Logger.Log.WriteLine($"  TX: ID=0x200 Data={BitConverter.ToString(setupData).Replace("-", " ")}");
+
+                if (!canInterface.SendCanMessage(setupMsg))
+                {
+                    Logger.Log.WriteLine($"  ERROR: Failed to send channel setup request");
+                    continue;
+                }
+
+                // Check if any frames were buffered during the send (response came fast)
+                var gotResponse = false;
+                while (canInterface.BufferedFrameCount > 0)
+                {
+                    var buffered = canInterface.ReceiveCanMessage(100);
+                    if (buffered != null)
+                    {
+                        Logger.Log.WriteLine($"  RX (buffered): ID=0x{buffered.Id:X3} [{buffered.DataLength}] {BitConverter.ToString(buffered.Data).Replace("-", " ")}");
+                        if (buffered.Id == expectedResponseId)
+                        {
+                            gotResponse = true;
+                            AnalyzeTp20Response(buffered, address);
+                        }
+                    }
+                }
+
+                // Also actively monitor for 500ms more
+                var monitorEnd = DateTime.Now.AddMilliseconds(500);
+                while (DateTime.Now < monitorEnd)
+                {
+                    var msg = canInterface.ReceiveCanMessage(200);
+                    if (msg != null)
+                    {
+                        Logger.Log.WriteLine($"  RX (monitor): ID=0x{msg.Id:X3} [{msg.DataLength}] {BitConverter.ToString(msg.Data).Replace("-", " ")}");
+                        if (msg.Id == expectedResponseId)
+                        {
+                            gotResponse = true;
+                            AnalyzeTp20Response(msg, address);
+                        }
+                    }
+                }
+
+                if (!gotResponse)
+                {
+                    Logger.Log.WriteLine($"  NO RESPONSE on 0x{expectedResponseId:X3}");
+                }
+            }
+
+            // === Phase 3: STN1170 STPX Test ===
+            Logger.Log.WriteLine();
+            Logger.Log.WriteLine("--- Phase 3: STN1170 STPX Test ---");
+
+            // STPX is STN-specific: sends a frame and waits for response with filter, all in one command
+            // Format: STPX H:200, D:01C000100003010, R:1, T:500
+            //   H = header (TX CAN ID)
+            //   D = data bytes
+            //   R = expected number of response frames
+            //   T = timeout in ms
+            var stpxResult = canInterface.SendCommandWithResponse(
+                "STPX H:200, D:01C00010000301, R:1, T:500", 2000);
+
+            if (string.IsNullOrEmpty(stpxResult) || stpxResult.Contains("?"))
+            {
+                Logger.Log.WriteLine("STPX not supported (not an STN chip, or command not recognized)");
+                Logger.Log.WriteLine("This is normal for standard ELM327 adapters.");
+            }
+            else
+            {
+                Logger.Log.WriteLine($"STPX response: {stpxResult}");
+                if (stpxResult.Contains("NO DATA"))
+                {
+                    Logger.Log.WriteLine("Gateway did not respond to STPX channel setup");
+                }
+                else
+                {
+                    Logger.Log.WriteLine("STPX got a response — STN transport may work for TP 2.0!");
+                }
+            }
+
+            // === Phase 4: UDS broadcast (7DF) ===
+            Logger.Log.WriteLine();
+            Logger.Log.WriteLine("--- Phase 4: UDS Broadcast (7DF) ---");
+            Logger.Log.WriteLine("Sending DiagnosticSessionControl to OBD broadcast 0x7DF...");
+
+            // Open filter to accept all responses 7E8-7EF
+            canInterface.SetRxFilter(null); // Accept all
+
+            var broadcastData = new byte[] { 0x02, 0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00 };
+            var broadcastMsg = new CanMessage(0x7DF, broadcastData);
+            canInterface.ClearReceiveBuffer();
+
+            if (canInterface.SendCanMessage(broadcastMsg))
+            {
+                // Check buffered frames
+                while (canInterface.BufferedFrameCount > 0)
+                {
+                    var resp = canInterface.ReceiveCanMessage(100);
+                    if (resp != null)
+                    {
+                        var modName = resp.Id switch
+                        {
+                            0x7E8 => "Engine",
+                            0x7E9 => "Transmission",
+                            0x7EA => "ABS/ESP",
+                            0x7EB => "Airbag?",
+                            0x7EC => "Airbag",
+                            0x7ED => "Cluster",
+                            0x7EE => "Gateway",
+                            0x7EF => "Unknown",
+                            _ => $"0x{resp.Id:X3}"
+                        };
+                        Logger.Log.WriteLine($"  UDS response from {modName}: ID=0x{resp.Id:X3} [{resp.DataLength}] {BitConverter.ToString(resp.Data).Replace("-", " ")}");
+                    }
+                }
+
+                // Also monitor for 1 second for late responses
+                var udsEnd = DateTime.Now.AddMilliseconds(1000);
+                while (DateTime.Now < udsEnd)
+                {
+                    var resp = canInterface.ReceiveCanMessage(200);
+                    if (resp != null && resp.Id >= 0x7E8 && resp.Id <= 0x7EF)
+                    {
+                        var modName = resp.Id switch
+                        {
+                            0x7E8 => "Engine",
+                            0x7E9 => "Transmission",
+                            0x7EA => "ABS/ESP",
+                            0x7EB => "Airbag?",
+                            0x7EC => "Airbag",
+                            0x7ED => "Cluster",
+                            0x7EE => "Gateway",
+                            0x7EF => "Unknown",
+                            _ => $"0x{resp.Id:X3}"
+                        };
+                        Logger.Log.WriteLine($"  UDS response from {modName}: ID=0x{resp.Id:X3} [{resp.DataLength}] {BitConverter.ToString(resp.Data).Replace("-", " ")}");
+                    }
+                }
+            }
+            else
+            {
+                Logger.Log.WriteLine("  ERROR: Failed to send broadcast");
+            }
+
+            Logger.Log.WriteLine();
+            Logger.Log.WriteLine("=== TP 2.0 Diagnostic Complete ===");
+        }
+        catch (Exception ex)
+        {
+            Logger.Log.WriteLine($"TP 2.0 diagnostic failed: {ex.Message}");
+            Logger.Log.WriteLine($"Stack trace: {ex.StackTrace}");
+        }
+    }
+
+    private static void AnalyzeTp20Response(CanMessage response, byte moduleAddress)
+    {
+        if (response.DataLength < 7)
+        {
+            Logger.Log.WriteLine($"  >>> Response too short ({response.DataLength} bytes)");
+            return;
+        }
+
+        var opcode = response.Data[1];
+        if (opcode == 0xD8)
+        {
+            Logger.Log.WriteLine("  >>> Channel setup REFUSED by module");
+            return;
+        }
+
+        if ((opcode & 0xF0) != 0xD0)
+        {
+            Logger.Log.WriteLine($"  >>> Unexpected opcode: 0x{opcode:X2} (expected 0xD0 = ChannelSetupResponse)");
+            return;
+        }
+
+        // Extract dynamic CAN IDs (little-endian)
+        var rxId = (response.Data[2] | (response.Data[3] << 8)) & 0x7FF;
+        var txId = (response.Data[4] | (response.Data[5] << 8)) & 0x7FF;
+        var appType = response.Data[6];
+
+        Logger.Log.WriteLine($"  >>> CHANNEL SETUP OK!");
+        Logger.Log.WriteLine($"  >>> Dynamic RX ID: 0x{rxId:X3} (module → tester)");
+        Logger.Log.WriteLine($"  >>> Dynamic TX ID: 0x{txId:X3} (tester → module)");
+        Logger.Log.WriteLine($"  >>> Application: 0x{appType:X2}");
+    }
+
     private static void TestUdsDialog(string portName, int baudRate, byte controllerAddress)
     {
         Logger.Log.WriteLine("=== UDS (ISO 14229) Diagnostic Test ===");
@@ -1183,6 +1485,8 @@ COMMAND =
         (Group 0: Raw controller data)
     CanAutoScan
         Scan CAN bus for all VW TP 2.0 modules (addresses 0x01-0x7F)
+    CanDiag
+        Diagnose TP 2.0 connectivity: passive monitor, channel setup test, STPX, UDS broadcast
     CanGetSkc
         Read SKC/PIN code from instrument cluster over CAN bus (VDO CAN 920)
     CanMonitor
