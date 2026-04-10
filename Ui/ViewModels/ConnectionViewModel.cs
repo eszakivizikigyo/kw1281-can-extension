@@ -56,6 +56,23 @@ public partial class ConnectionViewModel : ViewModelBase
     [ObservableProperty]
     private byte _controllerAddress = 0x17;
 
+    public string ControllerAddressHex
+    {
+        get => ControllerAddress.ToString("X2");
+        set
+        {
+            if (byte.TryParse(value, System.Globalization.NumberStyles.HexNumber, null, out var parsed))
+            {
+                ControllerAddress = parsed;
+            }
+        }
+    }
+
+    partial void OnControllerAddressChanged(byte value)
+    {
+        OnPropertyChanged(nameof(ControllerAddressHex));
+    }
+
     [ObservableProperty]
     private string _statusText = "Disconnected";
 

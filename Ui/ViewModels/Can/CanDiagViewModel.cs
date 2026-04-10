@@ -46,7 +46,7 @@ public partial class CanDiagViewModel : ViewModelBase
     private async Task ConnectAsync()
     {
         IsBusy = true;
-        StatusText = "Opening TP 2.0 channel...";
+        StatusText = "Connecting...";
 
         try
         {
@@ -59,18 +59,16 @@ public partial class CanDiagViewModel : ViewModelBase
                 if (!canInterface.InitializeRawCan(500))
                     throw new InvalidOperationException("This adapter does not support raw CAN mode.");
 
-                using var channel = new Tp20Channel(canInterface, address);
-                if (!channel.Open())
+                using var transport = OpenTransport(canInterface, address);
+                if (transport == null)
                 {
-                    Logger.Log.WriteLine("Failed to open TP 2.0 channel");
+                    Logger.Log.WriteLine("No module responded (tried TP 2.0 and UDS/ISO-TP)");
                     return;
                 }
 
-                Logger.Log.WriteLine($"TP 2.0 channel open to 0x{address:X2}");
-
-                if (proto == "KWP2000")
+                if (proto == "KWP2000" && transport is Tp20Channel ch)
                 {
-                    using var kwp2000 = new Kwp2000CanDialog(channel);
+                    using var kwp2000 = new Kwp2000CanDialog(ch);
                     var response = kwp2000.SendReceive(
                         DiagnosticService.readEcuIdentification,
                         [0x9B]);
@@ -78,7 +76,7 @@ public partial class CanDiagViewModel : ViewModelBase
                 }
                 else
                 {
-                    using var uds = new UdsCanDialog(channel);
+                    using var uds = new UdsCanDialog(transport);
                     var partData = uds.ReadDataByIdentifier(0xF187);
                     if (partData.Length > 2)
                     {
@@ -116,18 +114,28 @@ public partial class CanDiagViewModel : ViewModelBase
                 if (!canInterface.InitializeRawCan(500))
                     throw new InvalidOperationException("This adapter does not support raw CAN mode.");
 
-                using var channel = new Tp20Channel(canInterface, address);
-                if (!channel.Open())
+                using var transport = OpenTransport(canInterface, address);
+                if (transport == null)
                 {
-                    Logger.Log.WriteLine("Failed to open TP 2.0 channel");
+                    Logger.Log.WriteLine("No module responded");
                     return;
                 }
 
-                using var kwp2000 = new Kwp2000CanDialog(channel);
-                var response = kwp2000.SendReceive(
-                    DiagnosticService.readEcuIdentification,
-                    [0x9B]);
-                Logger.Log.WriteLine($"ECU Identification: {Utils.DumpAscii(response.Body)}");
+                if (transport is Tp20Channel ch)
+                {
+                    using var kwp2000 = new Kwp2000CanDialog(ch);
+                    var response = kwp2000.SendReceive(
+                        DiagnosticService.readEcuIdentification,
+                        [0x9B]);
+                    Logger.Log.WriteLine($"ECU Identification: {Utils.DumpAscii(response.Body)}");
+                }
+                else
+                {
+                    using var uds = new UdsCanDialog(transport);
+                    var partData = uds.ReadDataByIdentifier(0xF187);
+                    if (partData.Length > 2)
+                        Logger.Log.WriteLine($"Part Number: {Utils.DumpAscii(partData[2..])}");
+                }
             });
 
             StatusText = "Done.";
@@ -159,14 +167,14 @@ public partial class CanDiagViewModel : ViewModelBase
                 if (!canInterface.InitializeRawCan(500))
                     throw new InvalidOperationException("This adapter does not support raw CAN mode.");
 
-                using var channel = new Tp20Channel(canInterface, address);
-                if (!channel.Open())
+                using var transport = OpenTransport(canInterface, address);
+                if (transport == null)
                 {
-                    Logger.Log.WriteLine("Failed to open TP 2.0 channel");
+                    Logger.Log.WriteLine("No module responded");
                     return;
                 }
 
-                using var uds = new UdsCanDialog(channel);
+                using var uds = new UdsCanDialog(transport);
                 var vinData = uds.ReadDataByIdentifier(0xF190);
                 if (vinData.Length >= 2)
                 {
@@ -204,14 +212,14 @@ public partial class CanDiagViewModel : ViewModelBase
                 if (!canInterface.InitializeRawCan(500))
                     throw new InvalidOperationException("This adapter does not support raw CAN mode.");
 
-                using var channel = new Tp20Channel(canInterface, address);
-                if (!channel.Open())
+                using var transport = OpenTransport(canInterface, address);
+                if (transport == null)
                 {
-                    Logger.Log.WriteLine("Failed to open TP 2.0 channel");
+                    Logger.Log.WriteLine("No module responded");
                     return;
                 }
 
-                using var uds = new UdsCanDialog(channel);
+                using var uds = new UdsCanDialog(transport);
                 var partData = uds.ReadDataByIdentifier(0xF187);
                 if (partData.Length > 2)
                 {
@@ -249,22 +257,22 @@ public partial class CanDiagViewModel : ViewModelBase
                 if (!canInterface.InitializeRawCan(500))
                     throw new InvalidOperationException("This adapter does not support raw CAN mode.");
 
-                using var channel = new Tp20Channel(canInterface, address);
-                if (!channel.Open())
+                using var transport = OpenTransport(canInterface, address);
+                if (transport == null)
                 {
-                    Logger.Log.WriteLine("Failed to open TP 2.0 channel");
+                    Logger.Log.WriteLine("No module responded");
                     return;
                 }
 
-                if (proto == "KWP2000")
+                if (proto == "KWP2000" && transport is Tp20Channel ch)
                 {
-                    using var kwp2000 = new Kwp2000CanDialog(channel);
+                    using var kwp2000 = new Kwp2000CanDialog(ch);
                     kwp2000.SendReceive(DiagnosticService.testerPresent, []);
                     Logger.Log.WriteLine("TesterPresent positive response received!");
                 }
                 else
                 {
-                    using var uds = new UdsCanDialog(channel);
+                    using var uds = new UdsCanDialog(transport);
                     uds.TesterPresent();
                     Logger.Log.WriteLine("TesterPresent OK");
                 }
@@ -299,14 +307,14 @@ public partial class CanDiagViewModel : ViewModelBase
                 if (!canInterface.InitializeRawCan(500))
                     throw new InvalidOperationException("This adapter does not support raw CAN mode.");
 
-                using var channel = new Tp20Channel(canInterface, address);
-                if (!channel.Open())
+                using var transport = OpenTransport(canInterface, address);
+                if (transport == null)
                 {
-                    Logger.Log.WriteLine("Failed to open TP 2.0 channel");
+                    Logger.Log.WriteLine("No module responded");
                     return;
                 }
 
-                using var uds = new UdsCanDialog(channel);
+                using var uds = new UdsCanDialog(transport);
                 var response = uds.DiagnosticSessionControl(0x03);
                 Logger.Log.WriteLine($"Extended session started ({response.Length} bytes response)");
             });
@@ -323,4 +331,51 @@ public partial class CanDiagViewModel : ViewModelBase
             IsBusy = false;
         }
     }
+
+    /// <summary>
+    /// Try to open a transport to the given VAG module address.
+    /// First tries VW TP 2.0, then falls back to UDS/ISO-TP on standard CAN IDs.
+    /// </summary>
+    private static ICanTransport? OpenTransport(CanInterface canInterface, byte address)
+    {
+        // Try VW TP 2.0 first
+        var channel = new Tp20Channel(canInterface, address);
+        if (channel.Open())
+        {
+            Logger.Log.WriteLine($"TP 2.0 channel open to 0x{address:X2}");
+            return channel;
+        }
+        channel.Dispose();
+
+        // Map VAG address to standard UDS CAN ID pair
+        var (txId, rxId) = MapToUdsCanIds(address);
+        if (txId == 0) return null;
+
+        Logger.Log.WriteLine($"TP 2.0 failed — trying UDS/ISO-TP on 0x{txId:X3}/0x{rxId:X3}...");
+
+        var transport = new ElmIsoTpTransport(canInterface, txId, rxId);
+        if (transport.Open())
+        {
+            Logger.Log.WriteLine($"ISO-TP transport open: TX=0x{txId:X3} RX=0x{rxId:X3}");
+            return transport;
+        }
+        transport.Dispose();
+        return null;
+    }
+
+    /// <summary>
+    /// Map VAG controller address to standard OBD/UDS CAN ID pair.
+    /// </summary>
+    private static (uint txId, uint rxId) MapToUdsCanIds(byte vagAddress) => vagAddress switch
+    {
+        0x01 => (0x7E0, 0x7E8), // Engine
+        0x02 => (0x7E1, 0x7E9), // Transmission
+        0x03 => (0x7E2, 0x7EA), // ABS/ESP
+        0x15 => (0x7E3, 0x7EB), // Airbag
+        0x08 => (0x7E4, 0x7EC), // Climate/AC
+        0x44 => (0x7E5, 0x7ED), // Steering
+        0x19 => (0x7E6, 0x7EE), // Gateway
+        0x17 => (0x7E7, 0x7EF), // Instrument Cluster
+        _ => (0, 0)
+    };
 }

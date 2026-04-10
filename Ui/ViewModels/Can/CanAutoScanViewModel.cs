@@ -63,7 +63,10 @@ public partial class CanAutoScanViewModel : ViewModelBase
                 }
 
                 Logger.Log.WriteLine("=== CAN AutoScan ===");
-                Logger.Log.WriteLine("Scanning VW TP 2.0 addresses 0x01-0x7F...");
+
+                // Phase 1: Scan VW TP 2.0 addresses 0x01-0x7F
+                Logger.Log.WriteLine("Phase 1: Scanning VW TP 2.0 addresses 0x01-0x7F...");
+                int tp20Found = 0;
 
                 for (byte address = 0x01; address < 0x80; address++)
                 {
@@ -72,13 +75,14 @@ public partial class CanAutoScanViewModel : ViewModelBase
                     Dispatcher.UIThread.Post(() =>
                     {
                         Progress = address;
-                        StatusText = $"Scanning 0x{address:X2}...";
+                        StatusText = $"TP 2.0 scan 0x{address:X2}...";
                     });
 
                     using var channel = new Tp20Channel(canInterface, address);
                     if (!channel.Open())
                         continue;
 
+                    tp20Found++;
                     var name = ControllerAddressExtensions.GetControllerName(address);
                     var protocol = "";
                     var ident = "";
@@ -122,6 +126,63 @@ public partial class CanAutoScanViewModel : ViewModelBase
 
                     Logger.Log.WriteLine($"  0x{address:X2} {name,-20} [{protocol,-7}] {ident}");
                 }
+
+                // Phase 2: If no TP 2.0 modules found, try UDS over ISO-TP
+                if (tp20Found == 0)
+                {
+                    Logger.Log.WriteLine("No TP 2.0 modules found. Trying UDS over ISO-TP...");
+
+                    Dispatcher.UIThread.Post(() => StatusText = "Scanning UDS/ISO-TP...");
+
+                    // Standard OBD/UDS address pairs: TX 0x7E0+i → RX 0x7E8+i
+                    for (int i = 0; i < 8; i++)
+                    {
+                        ct.ThrowIfCancellationRequested();
+
+                        uint txId = (uint)(0x7E0 + i);
+                        uint rxId = (uint)(0x7E8 + i);
+
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            Progress = 0x80 + i;
+                            StatusText = $"UDS scan 0x{txId:X3}...";
+                        });
+
+                        using var transport = new ElmIsoTpTransport(canInterface, txId, rxId);
+                        if (!transport.Open())
+                            continue;
+
+                        try
+                        {
+                            using var uds = new UdsCanDialog(transport);
+
+                            // TesterPresent to check if module exists
+                            uds.TesterPresent();
+
+                            var ident = "";
+                            try
+                            {
+                                var partData = uds.ReadDataByIdentifier(0xF187);
+                                if (partData.Length > 2)
+                                    ident = Utils.DumpAscii(partData[2..]).Trim();
+                            }
+                            catch { /* Module exists but doesn't support F187 */ }
+
+                            var name = GetUdsModuleName(i);
+                            var txAddr = txId;
+                            Dispatcher.UIThread.Post(() =>
+                            {
+                                Results.Add(new ScanResultItem($"0x{txAddr:X3}", name, "UDS", ident));
+                            });
+
+                            Logger.Log.WriteLine($"  0x{txId:X3} {name,-20} [UDS    ] {ident}");
+                        }
+                        catch
+                        {
+                            // Module doesn't respond to UDS
+                        }
+                    }
+                }
             }, ct);
 
             StatusText = $"Done. {Results.Count} module(s) found.";
@@ -142,6 +203,19 @@ public partial class CanAutoScanViewModel : ViewModelBase
             _cts = null;
         }
     }
+
+    private static string GetUdsModuleName(int index) => index switch
+    {
+        0 => "Engine",
+        1 => "Transmission",
+        2 => "ABS/ESP",
+        3 => "Airbag",
+        4 => "Climate/AC",
+        5 => "Steering",
+        6 => "Gateway",
+        7 => "Instrument Cluster",
+        _ => $"Module {index}"
+    };
 
     [RelayCommand(CanExecute = nameof(CanStop))]
     private void Stop()

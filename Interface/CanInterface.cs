@@ -259,7 +259,8 @@ namespace BitFab.KW1281Test.Interface
             if (!SendCommand("ATAT0")) return false;  // Disable adaptive timing
             if (!SendCommand("ATST32")) return false;  // Response timeout ~200ms
             if (!SendCommand("ATD0")) return false;    // Disable DLC display
-            if (!SendCommand("ATAR")) return false;    // Clear receive address filter
+            if (!SendCommand("ATCF000")) return false; // CAN filter: match pattern 0x000
+            if (!SendCommand("ATCM000")) return false; // CAN mask: all bits don't-care → accept ALL CAN IDs
             return true;
         }
 
@@ -343,7 +344,9 @@ namespace BitFab.KW1281Test.Interface
             }
             else
             {
-                return SendCommand("ATAR");
+                // Open CAN filter: accept ALL CAN IDs
+                // Note: ATAR only auto-derives filter from protocol, doesn't truly accept all
+                return SendCommand("ATCF000") && SendCommand("ATCM000");
             }
         }
 
@@ -372,8 +375,10 @@ namespace BitFab.KW1281Test.Interface
         }
 
         /// <summary>
-        /// Attempt ATZ reset at current baud rate. Returns true if the device responds with "ELM".
+        /// Attempt ATZ reset at current baud rate. Returns true if the device responds with "ELM" or "STN".
         /// Does NOT hold _lock — caller must be outside lock or use carefully.
+        /// STN chips (STN1170, STN2120) perform a real hardware reset on ATZ which takes ~1.5s,
+        /// so we use a longer timeout than the default ReadTimeout.
         /// </summary>
         private bool TryReset()
         {
@@ -390,10 +395,41 @@ namespace BitFab.KW1281Test.Interface
                 Log.WriteLine($"Sending: ATZ");
                 _port.WriteLine("ATZ");
 
-                var response = ReadResponse();
+                // STN chips need longer for hardware reset — use 2500ms instead of default ReadTimeout
+                var sb = new StringBuilder();
+                var endTime = DateTime.Now.AddMilliseconds(2500);
+
+                while (DateTime.Now < endTime)
+                {
+                    try
+                    {
+                        if (_port.BytesToRead > 0)
+                        {
+                            var ch = (char)_port.ReadChar();
+                            if (ch == '>')
+                            {
+                                break;
+                            }
+                            if (ch != '\r' && ch != '\n' && ch != '\0')
+                            {
+                                sb.Append(ch);
+                            }
+                        }
+                        else
+                        {
+                            Thread.Sleep(10);
+                        }
+                    }
+                    catch (TimeoutException)
+                    {
+                        break;
+                    }
+                }
+
+                var response = sb.ToString().Trim();
                 Log.WriteLine($"Response: {response}");
 
-                return response.Contains("ELM");
+                return response.Contains("ELM") || response.Contains("STN");
             }
             catch
             {
@@ -430,6 +466,84 @@ namespace BitFab.KW1281Test.Interface
                 {
                     Log.WriteLine($"Error sending command {command}: {ex.Message}");
                     return false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Send a command and return the raw response string.
+        /// Used by ElmIsoTpTransport for UDS send+receive in protocol mode.
+        /// </summary>
+        internal string SendCommandWithResponse(string command, int? timeoutMs = null)
+        {
+            lock (_lock)
+            {
+                try
+                {
+                    // Brief pause to let ELM327 finish any pending multi-frame response
+                    Thread.Sleep(50);
+                    _port.DiscardInBuffer();
+                    _port.DiscardOutBuffer();
+
+                    Log.WriteLine($"Sending: {command}");
+                    _port.WriteLine(command);
+
+                    var oldTimeout = _port.ReadTimeout;
+                    if (timeoutMs.HasValue)
+                        _port.ReadTimeout = timeoutMs.Value;
+
+                    var response = ReadResponse();
+
+                    if (timeoutMs.HasValue)
+                        _port.ReadTimeout = oldTimeout;
+
+                    Log.WriteLine($"Response: {response}");
+                    return response;
+                }
+                catch (TimeoutException)
+                {
+                    Log.WriteLine($"Timeout waiting for response to: {command}");
+                    return string.Empty;
+                }
+                catch (Exception ex)
+                {
+                    Log.WriteLine($"Error sending command {command}: {ex.Message}");
+                    return string.Empty;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Send a command and return the response as individual lines.
+        /// Used by ElmIsoTpTransport for multi-frame ISO-TP responses.
+        /// </summary>
+        internal List<string> SendCommandWithResponseLines(string command, int? timeoutMs = null)
+        {
+            lock (_lock)
+            {
+                try
+                {
+                    Thread.Sleep(50);
+                    _port.DiscardInBuffer();
+                    _port.DiscardOutBuffer();
+
+                    Log.WriteLine($"Sending: {command}");
+                    _port.WriteLine(command);
+
+                    var lines = ReadResponseLines(timeoutMs);
+
+                    Log.WriteLine($"Response: {string.Join(" | ", lines)}");
+                    return lines;
+                }
+                catch (TimeoutException)
+                {
+                    Log.WriteLine($"Timeout waiting for response to: {command}");
+                    return new List<string>();
+                }
+                catch (Exception ex)
+                {
+                    Log.WriteLine($"Error sending command {command}: {ex.Message}");
+                    return new List<string>();
                 }
             }
         }

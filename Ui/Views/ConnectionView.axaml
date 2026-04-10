@@ -12,6 +12,8 @@
                 <TextBlock Text="Port:" VerticalAlignment="Center" />
                 <ComboBox ItemsSource="{Binding AvailablePorts}"
                           SelectedItem="{Binding SelectedPort}"
+                          Text="{Binding SelectedPort}"
+                          IsEditable="True"
                           MinWidth="120" />
                 <Button Content="⟳" Command="{Binding RefreshPortsCommand}"
                         ToolTip.Tip="Refresh ports" />
@@ -42,11 +44,10 @@
             <!-- Controller Address (K-Line only) -->
             <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,12,4"
                         IsVisible="{Binding IsKLineMode}">
-                <TextBlock Text="Address:" VerticalAlignment="Center" />
-                <NumericUpDown Value="{Binding ControllerAddress}"
-                               Minimum="1" Maximum="255"
-                               FormatString="0"
-                               MinWidth="80" />
+                <TextBlock Text="Address (hex):" VerticalAlignment="Center" />
+                <TextBox Text="{Binding ControllerAddressHex}"
+                         MinWidth="60" MaxLength="2"
+                         Watermark="17" />
             </StackPanel>
 
             <!-- Connect / Disconnect -->

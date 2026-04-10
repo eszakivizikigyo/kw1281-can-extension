@@ -1,3 +1,4 @@
+using BitFab.KW1281Test.Interface;
 using BitFab.KW1281Test.Kwp2000;
 using System;
 using System.Collections.Generic;
@@ -5,20 +6,20 @@ using System.Collections.Generic;
 namespace BitFab.KW1281Test.Uds;
 
 /// <summary>
-/// UDS (ISO 14229) diagnostic dialog over CAN bus using VW TP 2.0 transport.
-/// Reuses the same Tp20Channel as Kwp2000CanDialog, but with UDS service encoding.
+/// UDS (ISO 14229) diagnostic dialog over CAN bus.
+/// Works with any ICanTransport: VW TP 2.0 (Tp20Channel) or ISO-TP (ElmIsoTpTransport).
 /// </summary>
 internal class UdsCanDialog : IDisposable
 {
-    private readonly Tp20Channel _channel;
+    private readonly ICanTransport _transport;
 
-    public UdsCanDialog(Tp20Channel channel)
+    public UdsCanDialog(ICanTransport transport)
     {
-        _channel = channel ?? throw new ArgumentNullException(nameof(channel));
+        _transport = transport ?? throw new ArgumentNullException(nameof(transport));
 
-        if (!_channel.IsOpen)
+        if (!_transport.IsOpen)
         {
-            throw new InvalidOperationException("TP 2.0 channel must be open");
+            throw new InvalidOperationException("Transport must be open");
         }
     }
 
@@ -32,17 +33,17 @@ internal class UdsCanDialog : IDisposable
         payload[0] = (byte)service;
         Array.Copy(data, 0, payload, 1, data.Length);
 
-        if (!_channel.SendData(payload))
+        if (!_transport.SendData(payload))
         {
-            throw new InvalidOperationException("Failed to send UDS message over TP 2.0");
+            throw new InvalidOperationException("Failed to send UDS message");
         }
 
         while (true)
         {
-            var response = _channel.ReceiveData();
+            var response = _transport.ReceiveData();
             if (response == null || response.Length < 1)
             {
-                throw new InvalidOperationException("No response received over TP 2.0");
+                throw new InvalidOperationException("No response received");
             }
 
             var responseSid = response[0];
@@ -164,7 +165,7 @@ internal class UdsCanDialog : IDisposable
 
     public void Dispose()
     {
-        _channel.Dispose();
+        _transport.Dispose();
     }
 
     internal static byte GetByteSize(uint value)

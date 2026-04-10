@@ -112,6 +112,16 @@ internal class CanRouter : IDisposable
     }
 
     /// <summary>
+    /// Set the CAN receive address filter (ATCRA) so the ELM327 accepts
+    /// responses on the specified CAN ID after a send.
+    /// Pass null to clear the filter (accept all via ATCF000/ATCM000).
+    /// </summary>
+    public bool SetRxFilter(uint? canId)
+    {
+        return _canInterface.SetRxFilter(canId);
+    }
+
+    /// <summary>
     /// Number of currently registered channels.
     /// </summary>
     public int RegisteredChannelCount => _channelQueues.Count;

@@ -18,20 +18,20 @@ internal class UiLogAdapter : ILog
     {
         var level = ClassifyMessage(message);
         var entry = new LogEntry(DateTime.Now, message, level);
-        Dispatcher.UIThread.Post(() => Entries.Add(entry));
+        Dispatcher.UIThread.Post(() => Entries.Insert(0, entry));
     }
 
     public void WriteLine(LogDest dest = LogDest.All)
     {
         var entry = new LogEntry(DateTime.Now, string.Empty);
-        Dispatcher.UIThread.Post(() => Entries.Add(entry));
+        Dispatcher.UIThread.Post(() => Entries.Insert(0, entry));
     }
 
     public void WriteLine(string message, LogDest dest = LogDest.All)
     {
         var level = ClassifyMessage(message);
         var entry = new LogEntry(DateTime.Now, message, level);
-        Dispatcher.UIThread.Post(() => Entries.Add(entry));
+        Dispatcher.UIThread.Post(() => Entries.Insert(0, entry));
     }
 
     public void Close() { }

@@ -262,9 +262,7 @@ class Program
             login = ushort.Parse(args[4]);
         }
 
-        using var @interface = InterfaceFactory.OpenPort(portName, baudRate);
-        var tester = new Tester(@interface, controllerAddress);
-        
+        // CAN commands open their own port, so handle them before opening K-line interface
         switch (command.ToLower())
         {
             case "cantest":
@@ -294,7 +292,13 @@ class Program
             case "cangetskc":
                 CanGetSkc(portName, baudRate);
                 return;
+        }
 
+        using var @interface = InterfaceFactory.OpenPort(portName, baudRate);
+        var tester = new Tester(@interface, controllerAddress);
+
+        switch (command.ToLower())
+        {
             case "autoscan":
                 AutoScan(@interface);
                 return;
@@ -795,14 +799,58 @@ class Program
                 return;
             }
 
-            using var channel = new Tp20Channel(canInterface, controllerAddress);
-            if (!channel.Open())
+            // Try TP 2.0 first, then fallback to ISO-TP
+            ICanTransport? transport = null;
+
+            var channel = new Tp20Channel(canInterface, controllerAddress);
+            if (channel.Open())
             {
-                Logger.Log.WriteLine("Failed to open TP 2.0 channel");
+                transport = channel;
+            }
+            else
+            {
+                channel.Dispose();
+                Logger.Log.WriteLine("TP 2.0 failed — trying UDS/ISO-TP...");
+
+                // Map common VAG addresses to standard UDS CAN IDs
+                // Standard OBD-II: 7E0-7E7 → 7E8-7EF
+                // VAG extended: 700+addr → 700+addr+8 (some modules)
+                var (txId, rxId) = controllerAddress switch
+                {
+                    0x01 => (0x7E0u, 0x7E8u),  // Engine
+                    0x02 => (0x7E1u, 0x7E9u),  // Transmission
+                    0x03 => (0x7E2u, 0x7EAu),  // ABS/ESP
+                    0x09 => (0x7E0u, 0x7E8u),  // BCM/Gateway (may respond on Engine ID)
+                    0x15 => (0x7E4u, 0x7ECu),  // Airbag
+                    0x17 => (0x7E5u, 0x7EDu),  // Cluster
+                    0x19 => (0x7E6u, 0x7EEu),  // Gateway
+                    // Generic: addresses 0x10-0xFF → try standard OBD pair offset
+                    _ when controllerAddress >= 0x01 && controllerAddress <= 0x08
+                        => (0x7DFu + controllerAddress, 0x7E7u + controllerAddress),
+                    _ => (0u, 0u)
+                };
+
+                if (txId != 0)
+                {
+                    var isoTp = new ElmIsoTpTransport(canInterface, txId, rxId);
+                    if (isoTp.Open())
+                    {
+                        transport = isoTp;
+                    }
+                    else
+                    {
+                        isoTp.Dispose();
+                    }
+                }
+            }
+
+            if (transport == null)
+            {
+                Logger.Log.WriteLine("No module responded to TP 2.0 or UDS/ISO-TP");
                 return;
             }
 
-            using var uds = new UdsCanDialog(channel);
+            using var uds = new UdsCanDialog(transport);
 
             // DiagnosticSessionControl → Extended session (0x03)
             Logger.Log.WriteLine("Starting extended diagnostic session...");

@@ -20,7 +20,7 @@ namespace BitFab.KW1281Test.Kwp2000;
 /// Supports multi-channel operation through CanRouter: when multiple channels share
 /// one CAN interface, frames are automatically routed to the correct channel.
 /// </summary>
-internal class Tp20Channel : IDisposable
+internal class Tp20Channel : ICanTransport
 {
     private readonly CanRouter _router;
     private readonly byte _moduleAddress;
@@ -150,6 +150,9 @@ internal class Tp20Channel : IDisposable
     {
         if (!IsOpen)
             throw new InvalidOperationException("TP 2.0 channel is not open");
+
+        // Set ATCRA so ELM327 captures ACK/response frames on our RX channel
+        _router.SetRxFilter(_rxId);
 
         var maxPayload = 7; // First byte is TP header, remaining 7 are data
         var offset = 0;
@@ -282,6 +285,7 @@ internal class Tp20Channel : IDisposable
     {
         if (!IsOpen) return false;
 
+        _router.SetRxFilter(_rxId);
         var data = new byte[] { (byte)Tp20OpCode.ConnectionTest };
         return _router.SendMessage(new CanMessage(_txId, PadTo8(data)));
     }
@@ -290,67 +294,85 @@ internal class Tp20Channel : IDisposable
 
     private bool SendChannelSetupRequest()
     {
-        var setupId = (uint)(0x200 + _moduleAddress);
+        // VW TP 2.0: channel setup request always goes to CAN ID 0x200 (fixed broadcast).
+        // The destination module is identified by byte 0 in the data field.
+        // The module responds on CAN ID 0x200 + its_logical_address.
+        const uint setupId = 0x200;
+        var expectedResponseId = (uint)(0x200 + _moduleAddress);
 
-        // Channel setup request:
+        // Channel setup request (matches VCDS/VAG-COM format):
         // Byte 0: Destination module address (logical)
         // Byte 1: 0xC0 (channel setup opcode)
-        // Byte 2: RX ID low byte (what we want module to use when talking to us)
-        // Byte 3: RX ID high byte
-        // Byte 4: TX ID low byte (what we will use to talk to module) - 0x0000 = let module decide
-        // Byte 5: TX ID high byte
+        // Byte 2-3: RX_VALID (little-endian) — 0x1000 = let module decide
+        // Byte 4-5: TX_VALID (little-endian) — 0x0300 = suggest 0x300 range
         // Byte 6: Application type (0x01 = KWP2000 diagnostics)
-        var requestedRxId = (uint)(0x300 + _moduleAddress);
         var data = new byte[]
         {
             _moduleAddress,
             (byte)Tp20OpCode.ChannelSetupRequest,
-            (byte)(requestedRxId & 0xFF),
-            (byte)((requestedRxId >> 8) & 0xFF),
-            0x00, 0x10, // TX ID range: 0x1000 (convention, module usually assigns different)
+            0x00, 0x10, // RX_VALID: 0x1000 (let module assign)
+            0x00, 0x03, // TX_VALID: 0x0300 (suggest 0x300 range)
             0x01        // Application: KWP2000 diagnostics
         };
 
+        // Set ATCRA so ELM327 accepts the module's response after sending
+        _router.SetRxFilter(expectedResponseId);
         return _router.SendMessage(new CanMessage(setupId, PadTo8(data)));
     }
 
     private bool ReceiveChannelSetupResponse()
     {
-        // We expect a response on CAN ID 0x200 + tester_logical_address
-        // In practice, responses come back on specific module response IDs
-        // Use ReceiveUnregisteredMessage because _rxId isn't known yet
-        var frame = _router.ReceiveUnregisteredMessage(ReceiveTimeoutMs);
-        if (frame == null)
-        {
-            Log.WriteLine("No channel setup response received");
-            return false;
-        }
+        // VW TP 2.0: module responds on CAN ID 0x200 + module_logical_address.
+        // On a real CAN bus, other ECU traffic is also present, so we loop
+        // through received frames until we find the setup response (opcode 0xD0).
+        var expectedResponseId = (uint)(0x200 + _moduleAddress);
+        var deadline = DateTime.UtcNow.AddMilliseconds(ReceiveTimeoutMs);
 
-        if (frame.DataLength < 7)
+        while (true)
         {
-            Log.WriteLine($"Channel setup response too short: {frame.DataLength} bytes");
-            return false;
-        }
+            var remaining = (int)(deadline - DateTime.UtcNow).TotalMilliseconds;
+            if (remaining <= 0)
+            {
+                Log.WriteLine("No channel setup response received (timeout)");
+                return false;
+            }
 
-        var opcode = frame.Data[1];
-        if ((opcode & 0xF0) != (byte)Tp20OpCode.ChannelSetupResponse)
-        {
+            var frame = _router.ReceiveUnregisteredMessage(remaining);
+            if (frame == null)
+            {
+                Log.WriteLine("No channel setup response received");
+                return false;
+            }
+
+            // Log all received frames for debugging
+            Log.WriteLine($"RX setup: ID=0x{frame.Id:X3} [{frame.DataLength}] {BitConverter.ToString(frame.Data).Replace("-", "")}");
+
+            // Skip frames that aren't from the expected CAN ID
+            if (frame.Id != expectedResponseId)
+                continue;
+
+            if (frame.DataLength < 7)
+                continue;
+
+            var opcode = frame.Data[1];
+
             // Check for negative response (0xD8 = channel setup refused)
             if (opcode == 0xD8)
             {
                 Log.WriteLine("Channel setup refused by module");
                 return false;
             }
-            Log.WriteLine($"Unexpected channel setup response opcode: 0x{opcode:X2}");
-            return false;
+
+            if ((opcode & 0xF0) != (byte)Tp20OpCode.ChannelSetupResponse)
+                continue;
+
+            // Extract dynamic CAN IDs assigned by the module (11-bit, little-endian)
+            _rxId = (uint)(frame.Data[2] | (frame.Data[3] << 8)) & 0x7FF;
+            _txId = (uint)(frame.Data[4] | (frame.Data[5] << 8)) & 0x7FF;
+
+            Log.WriteLine($"Channel setup OK: RX ID=0x{_rxId:X3}, TX ID=0x{_txId:X3}");
+            return true;
         }
-
-        // Extract dynamic CAN IDs assigned by the module
-        _rxId = (uint)(frame.Data[2] | (frame.Data[3] << 8));
-        _txId = (uint)(frame.Data[4] | (frame.Data[5] << 8));
-
-        Log.WriteLine($"Channel setup: RX ID=0x{_rxId:X3}, TX ID=0x{_txId:X3}");
-        return true;
     }
 
     private bool SendChannelParametersRequest()
@@ -372,6 +394,8 @@ internal class Tp20Channel : IDisposable
             0xFF
         };
 
+        // Set ATCRA so ELM327 accepts the module's response on the dynamic RX ID
+        _router.SetRxFilter(_rxId);
         return _router.SendMessage(new CanMessage(_txId, PadTo8(data)));
     }
 
