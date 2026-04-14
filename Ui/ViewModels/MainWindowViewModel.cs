@@ -97,6 +97,7 @@ public partial class MainWindowViewModel : ViewModelBase
         "Can.MultiEcu"      => new CanMultiEcuViewModel(_connectionService),
         "Can.Skc"           => new CanSkcViewModel(_connectionService),
         "Can.Obd2"          => new Obd2ViewModel(_connectionService),
+        "Can.ClusterSwap"   => new ClusterSwapViewModel(_connectionService) { DialogService = DialogService },
         _ => null,
     };
 
@@ -153,6 +154,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     new NavigationItem { Title = "Multi-ECU", Tag = "Can.MultiEcu" },
                     new NavigationItem { Title = "SKC / PIN", Tag = "Can.Skc" },
                     new NavigationItem { Title = "OBD2 Live Data", Tag = "Can.Obd2" },
+                    new NavigationItem { Title = "Cluster Swap", Tag = "Can.ClusterSwap" },
                 ]
             }
         ];

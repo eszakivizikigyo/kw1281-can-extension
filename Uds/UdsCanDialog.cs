@@ -151,6 +151,20 @@ internal class UdsCanDialog : IDisposable
         return SendReceive(UdsService.ReadMemoryByAddress, request.ToArray());
     }
 
+    public void WriteMemoryByAddress(uint address, byte[] data)
+    {
+        byte addressSize = GetByteSize(address);
+        byte lengthSize = GetByteSize((uint)data.Length);
+        byte formatId = (byte)((lengthSize << 4) | addressSize);
+
+        var request = new List<byte> { formatId };
+        AddBigEndian(request, address, addressSize);
+        AddBigEndian(request, (uint)data.Length, lengthSize);
+        request.AddRange(data);
+
+        SendReceive(UdsService.WriteMemoryByAddress, request.ToArray());
+    }
+
     public byte[] RoutineControl(byte subFunction, ushort routineId, byte[] routineData)
     {
         var request = new List<byte>
