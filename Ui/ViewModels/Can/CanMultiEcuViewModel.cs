@@ -39,6 +39,15 @@ public partial class CanMultiEcuViewModel : ViewModelBase
     public CanMultiEcuViewModel(ConnectionService connectionService)
     {
         _connectionService = connectionService;
+        _connectionService.StateChanged += OnConnectionStateChanged;
+    }
+
+    private void OnConnectionStateChanged(object? sender, EventArgs e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            ScanCommand.NotifyCanExecuteChanged();
+        });
     }
 
     private bool CanScan() => !IsBusy && _connectionService.State == ConnectionState.Connected

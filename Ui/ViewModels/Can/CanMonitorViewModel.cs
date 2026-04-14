@@ -27,6 +27,16 @@ public partial class CanMonitorViewModel : ViewModelBase
     public CanMonitorViewModel(ConnectionService connectionService)
     {
         _connectionService = connectionService;
+        _connectionService.StateChanged += OnConnectionStateChanged;
+    }
+
+    private void OnConnectionStateChanged(object? sender, EventArgs e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            StartCommand.NotifyCanExecuteChanged();
+            StopCommand.NotifyCanExecuteChanged();
+        });
     }
 
     private bool CanStart() => !IsMonitoring && _connectionService.State == ConnectionState.Connected

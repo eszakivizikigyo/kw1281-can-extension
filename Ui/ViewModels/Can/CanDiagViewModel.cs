@@ -35,6 +35,20 @@ public partial class CanDiagViewModel : ViewModelBase
     public CanDiagViewModel(ConnectionService connectionService)
     {
         _connectionService = connectionService;
+        _connectionService.StateChanged += OnConnectionStateChanged;
+    }
+
+    private void OnConnectionStateChanged(object? sender, EventArgs e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            ConnectCommand.NotifyCanExecuteChanged();
+            ReadIdentCommand.NotifyCanExecuteChanged();
+            ReadVinCommand.NotifyCanExecuteChanged();
+            ReadPartNumberCommand.NotifyCanExecuteChanged();
+            TesterPresentCommand.NotifyCanExecuteChanged();
+            ExtendedSessionCommand.NotifyCanExecuteChanged();
+        });
     }
 
     private bool CanConnect() => !IsBusy && _connectionService.State == ConnectionState.Connected
@@ -364,18 +378,18 @@ public partial class CanDiagViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Map VAG controller address to standard OBD/UDS CAN ID pair.
+    /// Map VAG controller address to UDS CAN ID pair.
+    /// Verified live on VW T5.1 GP (2012) via vLinker FS — 2026-04-14.
     /// </summary>
     private static (uint txId, uint rxId) MapToUdsCanIds(byte vagAddress) => vagAddress switch
     {
-        0x01 => (0x7E0, 0x7E8), // Engine
-        0x02 => (0x7E1, 0x7E9), // Transmission
-        0x03 => (0x7E2, 0x7EA), // ABS/ESP
-        0x15 => (0x7E3, 0x7EB), // Airbag
-        0x08 => (0x7E4, 0x7EC), // Climate/AC
-        0x44 => (0x7E5, 0x7ED), // Steering
-        0x19 => (0x7E6, 0x7EE), // Gateway
-        0x17 => (0x7E7, 0x7EF), // Instrument Cluster
+        0x01 => (0x7E0, 0x7E8), // Engine (J623 CAAC 2.0 TDI)
+        0x02 => (0x7E1, 0x7E9), // Transmission (J743 DSG DQ500)
+        0x08 => (0x746, 0x7B0), // Auto HVAC / Climatronic (J301)
+        0x17 => (0x714, 0x77E), // Instrument Cluster (J285 "KOM")
+        0x19 => (0x715, 0x77F), // Gateway / BCM (J533 "VW1")
+        0x25 => (0x711, 0x77B), // Immobilizer (J518 "IMM")
+        0x37 => (0x76C, 0x7D6), // Navigation (J794 RNS315)
         _ => (0, 0)
     };
 }

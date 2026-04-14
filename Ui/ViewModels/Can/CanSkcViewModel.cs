@@ -1,8 +1,9 @@
 using System;
+using System.Text;
 using System.Threading.Tasks;
 using BitFab.KW1281Test.Cluster;
 using BitFab.KW1281Test.Interface;
-using BitFab.KW1281Test.Kwp2000;
+using BitFab.KW1281Test.Uds;
 using BitFab.KW1281Test.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -30,6 +31,16 @@ public partial class CanSkcViewModel : ViewModelBase
     public CanSkcViewModel(ConnectionService connectionService)
     {
         _connectionService = connectionService;
+        _connectionService.StateChanged += OnConnectionStateChanged;
+    }
+
+    private void OnConnectionStateChanged(object? sender, EventArgs e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            GetSkcCommand.NotifyCanExecuteChanged();
+            ReadClusterInfoCommand.NotifyCanExecuteChanged();
+        });
     }
 
     private bool CanExecute() => !IsBusy && _connectionService.State == ConnectionState.Connected
@@ -39,7 +50,7 @@ public partial class CanSkcViewModel : ViewModelBase
     private async Task ReadClusterInfoAsync()
     {
         IsBusy = true;
-        StatusText = "Reading cluster identification...";
+        StatusText = "Reading cluster identification via UDS...";
         ClusterInfo = string.Empty;
 
         try
@@ -48,18 +59,29 @@ public partial class CanSkcViewModel : ViewModelBase
 
             var ident = await Task.Run(() =>
             {
-                if (!canInterface.InitializeRawCan(500))
-                    throw new InvalidOperationException("This adapter does not support raw CAN mode.");
+                // Cluster (0x17) → TX=0x714, RX=0x77E (verified live on T5GP)
+                using var transport = new ElmIsoTpTransport(canInterface, 0x714, 0x77E);
+                if (!transport.Open())
+                    throw new InvalidOperationException("Failed to open ISO-TP transport to cluster (0x714/0x77E)");
 
-                using var channel = new Tp20Channel(canInterface, 0x17);
-                if (!channel.Open())
-                    throw new InvalidOperationException("Failed to open TP 2.0 channel to cluster (0x17)");
+                using var uds = new UdsCanDialog(transport);
 
-                using var kwp2000 = new Kwp2000CanDialog(channel);
-                var response = kwp2000.SendReceive(
-                    DiagnosticService.readEcuIdentification,
-                    new byte[] { 0x9B });
-                return Utils.DumpAscii(response.Body);
+                // Read system name (F197) and part number (F187)
+                var sb = new StringBuilder();
+
+                var sysName = uds.ReadDataByIdentifier(0xF197);
+                if (sysName.Length > 2)
+                    sb.Append(Encoding.ASCII.GetString(sysName, 2, sysName.Length - 2).TrimEnd('\0'));
+
+                var partNum = uds.ReadDataByIdentifier(0xF187);
+                if (partNum.Length > 2)
+                    sb.Append(" PN: ").Append(Encoding.ASCII.GetString(partNum, 2, partNum.Length - 2).TrimEnd('\0'));
+
+                var swVer = uds.ReadDataByIdentifier(0xF189);
+                if (swVer.Length > 2)
+                    sb.Append(" SW: ").Append(Encoding.ASCII.GetString(swVer, 2, swVer.Length - 2).TrimEnd('\0'));
+
+                return sb.ToString();
             });
 
             ClusterInfo = ident;
@@ -81,7 +103,7 @@ public partial class CanSkcViewModel : ViewModelBase
     private async Task GetSkcAsync()
     {
         IsBusy = true;
-        StatusText = "Reading SKC over CAN...";
+        StatusText = "Reading SKC via UDS/ISO-TP...";
         SkcResult = string.Empty;
 
         try
@@ -90,58 +112,56 @@ public partial class CanSkcViewModel : ViewModelBase
 
             var result = await Task.Run(() =>
             {
-                if (!canInterface.InitializeRawCan(500))
-                    throw new InvalidOperationException("This adapter does not support raw CAN mode.");
+                // Cluster (0x17) → TX=0x714, RX=0x77E (verified live on T5GP)
+                using var transport = new ElmIsoTpTransport(canInterface, 0x714, 0x77E);
+                if (!transport.Open())
+                    throw new InvalidOperationException("Failed to open ISO-TP transport to cluster (0x714/0x77E)");
 
-                using var channel = new Tp20Channel(canInterface, 0x17);
-                if (!channel.Open())
-                    throw new InvalidOperationException("Failed to open TP 2.0 channel to cluster (0x17)");
+                using var uds = new UdsCanDialog(transport);
 
-                using var kwp2000 = new Kwp2000CanDialog(channel);
-
-                // Read ECU identification
-                var identResponse = kwp2000.SendReceive(
-                    DiagnosticService.readEcuIdentification,
-                    new byte[] { 0x9B });
-                var ecuIdent = Utils.DumpAscii(identResponse.Body);
-                Logger.Log.WriteLine($"Cluster: {ecuIdent}");
+                // Read ECU identification via ReadDataByIdentifier
+                var partNumData = uds.ReadDataByIdentifier(0xF187);
+                var ecuIdent = partNumData.Length > 2
+                    ? Encoding.ASCII.GetString(partNumData, 2, partNumData.Length - 2).TrimEnd('\0')
+                    : "";
+                Logger.Log.WriteLine($"Cluster part number: {ecuIdent}");
 
                 var partNumberGroups = Tester.FindAndParsePartNumber(ecuIdent);
                 if (partNumberGroups.Length < 4)
                     throw new InvalidOperationException($"Unable to parse part number from: {ecuIdent}");
 
-                if (!ecuIdent.Contains("VDO") || partNumberGroups[1] != "920")
+                if (!ecuIdent.Contains("VDO") && partNumberGroups[1] != "920")
                     throw new InvalidOperationException(
                         $"CAN GetSKC only supports VDO CAN (920) clusters. Detected: {string.Join(" ", partNumberGroups)}");
 
-                Logger.Log.WriteLine("VDO CAN cluster detected. Reading EEPROM...");
+                Logger.Log.WriteLine("VDO CAN cluster detected. Reading EEPROM via UDS ReadMemoryByAddress...");
 
-                // Start diagnostic session for memory access
+                // Switch to extended diagnostic session for memory access
                 try
                 {
-                    kwp2000.StartDiagnosticSession(0x84, 0x14);
+                    uds.DiagnosticSessionControl(0x03); // extendedDiagnosticSession
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log.WriteLine($"Warning: Diagnostic session start failed: {ex.Message}");
+                    Logger.Log.WriteLine($"Warning: Extended session start failed: {ex.Message}");
                 }
 
                 // Read EEPROM region containing SKC (0x90 to 0x10C = 0x7C bytes)
-                const ushort startAddress = 0x90;
-                const byte length = 0x7C;
-                const byte chunkSize = 32;
+                const uint startAddress = 0x90;
+                const uint length = 0x7C;
+                const uint chunkSize = 32;
 
                 var buffer = new byte[length];
-                int offset = 0;
+                uint offset = 0;
                 while (offset < length)
                 {
-                    var readLen = (byte)Math.Min(chunkSize, length - offset);
-                    var data = kwp2000.ReadMemoryByAddress((uint)(startAddress + offset), readLen);
-                    Array.Copy(data, 0, buffer, offset, data.Length);
-                    offset += data.Length;
+                    var readLen = Math.Min(chunkSize, length - offset);
+                    var data = uds.ReadMemoryByAddress(startAddress + offset, readLen);
+                    Array.Copy(data, 0, buffer, (int)offset, data.Length);
+                    offset += (uint)data.Length;
                 }
 
-                var skc = VdoCluster.GetSkc(buffer, startAddress);
+                var skc = VdoCluster.GetSkc(buffer, (ushort)startAddress);
                 if (skc.HasValue)
                 {
                     Logger.Log.WriteLine($"SKC: {skc:D5}");
@@ -155,7 +175,7 @@ public partial class CanSkcViewModel : ViewModelBase
             SkcResult = result;
             StatusText = "Done.";
         }
-        catch (NegativeResponseException ex)
+        catch (NegativeUdsResponseException ex)
         {
             StatusText = $"Memory read rejected: {ex.Message}";
             SkcResult = "Security access may be required.";

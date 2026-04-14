@@ -296,6 +296,10 @@ class Program
             case "candiag":
                 CanDiagnoseTp20(portName, baudRate);
                 return;
+
+            case "elmkline":
+                ElmKLineScan(portName, baudRate, (byte)controllerAddress);
+                return;
         }
 
         using var @interface = InterfaceFactory.OpenPort(portName, baudRate);
@@ -1456,6 +1460,274 @@ class Program
         }
     }
 
+    /// <summary>
+    /// Test K-line communication via ELM327/STN1170 adapter.
+    /// Uses ISO 14230-4 KWP2000 (fast init and 5-baud init) to reach ECUs
+    /// that are on the K-line bus (OBD pin 7).
+    /// </summary>
+    private static void ElmKLineScan(string portName, int baudRate, byte controllerAddress)
+    {
+        Logger.Log.WriteLine("=== ELM327 K-Line Scan ===");
+        Logger.Log.WriteLine($"Port: {portName}, Baud: {baudRate}");
+        Logger.Log.WriteLine("Testing K-line via ELM327/STN AT commands (ISO 14230-4 KWP2000)");
+        Logger.Log.WriteLine();
+
+        try
+        {
+            using var canInterface = new CanInterface(portName, baudRate);
+
+            if (!canInterface.Initialize())
+            {
+                Logger.Log.WriteLine("Failed to initialize ELM327 interface");
+                return;
+            }
+
+            // Read adapter identity for diagnostics
+            var atiResponse = canInterface.SendCommandWithResponse("ATI");
+            Logger.Log.WriteLine($"Adapter: {atiResponse}");
+
+            var stdiResponse = canInterface.SendCommandWithResponse("STDI");
+            if (!string.IsNullOrEmpty(stdiResponse) && !stdiResponse.Contains("?"))
+            {
+                Logger.Log.WriteLine($"STN Device: {stdiResponse}");
+            }
+
+            Logger.Log.WriteLine();
+
+            // Determine scan targets
+            byte[] addresses;
+            if (controllerAddress != 0x01 || true) // If address was specified on command line
+            {
+                // Use standard VW diagnostic addresses
+                addresses = [
+                    0x01, // Engine
+                    0x02, // Transmission
+                    0x03, // ABS
+                    0x08, // HVAC
+                    0x09, // BCM / Central Electronics
+                    0x15, // Airbag
+                    0x17, // Cluster
+                    0x19, // Gateway
+                    0x25, // Immobilizer
+                    0x37, // Navigation
+                    0x46, // Central Comfort
+                    0x56, // Radio
+                    0x69, // Trailer
+                    0x6E, // Roof Display
+                    0x77, // Telephone
+                ];
+            }
+            else
+            {
+                addresses = [controllerAddress];
+            }
+
+            var foundModules = new List<(byte Address, string Name, string Protocol, string Response)>();
+
+            // === Phase 1: ISO 14230-4 Fast Init (ATSP5) ===
+            Logger.Log.WriteLine("--- Phase 1: KWP2000 Fast Init (ISO 14230-4, ATSP5) ---");
+            Logger.Log.WriteLine();
+
+            foreach (var address in addresses)
+            {
+                var name = ControllerAddressExtensions.GetControllerName(address);
+                Logger.Log.Write($"  0x{address:X2} {name,-20} Fast init... ");
+
+                // Reset protocol state
+                canInterface.SendCommand("ATPC"); // Protocol close
+
+                // Set protocol to ISO 14230-4 fast init
+                canInterface.SendCommand("ATSP5");
+
+                // Enable headers so we can see source/target addresses
+                canInterface.SendCommand("ATH1");
+
+                // Enable spaces for readability
+                canInterface.SendCommand("ATS1");
+
+                // Set wakeup message for fast init to specific address
+                // Format: C1 = format byte (addresses present, 1 data byte)
+                // Target = address, Source = F1 (tester), Service = 81 (StartCommunication)
+                canInterface.SendCommand($"ATWM C1 {address:X2} F1 81");
+
+                // Set header for subsequent messages: format, target, source
+                canInterface.SendCommand($"ATSH 81 {address:X2} F1");
+
+                // Send StartCommunication (SID 0x81) — the fast init trigger
+                // The format byte C1 in ATWM already includes this, but after init
+                // we need to send actual requests. 0100 = generic OBD request to test.
+                // Actually for KWP2000: send 1A 9B = readEcuIdentification(localIdent)
+                var response = canInterface.SendCommandWithResponse("1A 9B", timeoutMs: 5000);
+
+                if (!string.IsNullOrEmpty(response) &&
+                    !response.Contains("NO DATA", StringComparison.OrdinalIgnoreCase) &&
+                    !response.Contains("UNABLE TO CONNECT", StringComparison.OrdinalIgnoreCase) &&
+                    !response.Contains("ERROR", StringComparison.OrdinalIgnoreCase) &&
+                    !response.Contains("BUS INIT", StringComparison.OrdinalIgnoreCase) &&
+                    !response.Contains("?"))
+                {
+                    Logger.Log.WriteLine($"FOUND! Response: {response}");
+                    foundModules.Add((address, name, "KWP-Fast", response));
+                }
+                else
+                {
+                    Logger.Log.WriteLine($"no response ({response})");
+                }
+            }
+
+            Logger.Log.WriteLine();
+
+            // === Phase 2: ISO 14230-4 5-Baud Init (ATSP4) ===
+            Logger.Log.WriteLine("--- Phase 2: KWP2000 5-Baud Init (ISO 14230-4, ATSP4) ---");
+            Logger.Log.WriteLine();
+
+            foreach (var address in addresses)
+            {
+                // Skip addresses already found in Phase 1
+                if (foundModules.Any(m => m.Address == address))
+                {
+                    Logger.Log.Write($"  0x{address:X2} (already found in Phase 1, skipping)\n");
+                    continue;
+                }
+
+                var name = ControllerAddressExtensions.GetControllerName(address);
+                Logger.Log.Write($"  0x{address:X2} {name,-20} 5-baud init... ");
+
+                // Reset protocol state
+                canInterface.SendCommand("ATPC");
+
+                // Set protocol to ISO 14230-4 with 5-baud init
+                canInterface.SendCommand("ATSP4");
+
+                // Set ISO Init Address (the address byte used in 5-baud init sequence)
+                canInterface.SendCommand($"ATIIA {address:X2}");
+
+                // Enable headers
+                canInterface.SendCommand("ATH1");
+                canInterface.SendCommand("ATS1");
+
+                // Set header for messages
+                canInterface.SendCommand($"ATSH 81 {address:X2} F1");
+
+                // Send request — the ELM327 will perform the 5-baud init first (~3 sec)
+                var response = canInterface.SendCommandWithResponse("1A 9B", timeoutMs: 8000);
+
+                if (!string.IsNullOrEmpty(response) &&
+                    !response.Contains("NO DATA", StringComparison.OrdinalIgnoreCase) &&
+                    !response.Contains("UNABLE TO CONNECT", StringComparison.OrdinalIgnoreCase) &&
+                    !response.Contains("ERROR", StringComparison.OrdinalIgnoreCase) &&
+                    !response.Contains("BUS INIT", StringComparison.OrdinalIgnoreCase) &&
+                    !response.Contains("?"))
+                {
+                    Logger.Log.WriteLine($"FOUND! Response: {response}");
+                    foundModules.Add((address, name, "KWP-5Baud", response));
+                }
+                else
+                {
+                    Logger.Log.WriteLine($"no response ({response})");
+                }
+            }
+
+            Logger.Log.WriteLine();
+
+            // === Phase 3: ISO 9141-2 5-Baud Init (ATSP3) ===
+            Logger.Log.WriteLine("--- Phase 3: ISO 9141-2 5-Baud Init (ATSP3) ---");
+            Logger.Log.WriteLine("(Some older VW modules use ISO 9141 instead of KWP2000)");
+            Logger.Log.WriteLine();
+
+            foreach (var address in addresses)
+            {
+                if (foundModules.Any(m => m.Address == address))
+                {
+                    Logger.Log.Write($"  0x{address:X2} (already found, skipping)\n");
+                    continue;
+                }
+
+                var name = ControllerAddressExtensions.GetControllerName(address);
+                Logger.Log.Write($"  0x{address:X2} {name,-20} ISO 9141... ");
+
+                canInterface.SendCommand("ATPC");
+                canInterface.SendCommand("ATSP3");
+                canInterface.SendCommand($"ATIIA {address:X2}");
+                canInterface.SendCommand("ATH1");
+                canInterface.SendCommand("ATS1");
+
+                // For ISO 9141, try a simple mode 01 PID 00 request
+                var response = canInterface.SendCommandWithResponse("01 00", timeoutMs: 8000);
+
+                if (!string.IsNullOrEmpty(response) &&
+                    !response.Contains("NO DATA", StringComparison.OrdinalIgnoreCase) &&
+                    !response.Contains("UNABLE TO CONNECT", StringComparison.OrdinalIgnoreCase) &&
+                    !response.Contains("ERROR", StringComparison.OrdinalIgnoreCase) &&
+                    !response.Contains("BUS INIT", StringComparison.OrdinalIgnoreCase) &&
+                    !response.Contains("?"))
+                {
+                    Logger.Log.WriteLine($"FOUND! Response: {response}");
+                    foundModules.Add((address, name, "ISO9141", response));
+                }
+                else
+                {
+                    Logger.Log.WriteLine($"no response ({response})");
+                }
+            }
+
+            Logger.Log.WriteLine();
+
+            // === Phase 4: K-line voltage check via STN command ===
+            Logger.Log.WriteLine("--- Phase 4: K-line status check ---");
+            var stkvResponse = canInterface.SendCommandWithResponse("STKV");
+            if (!string.IsNullOrEmpty(stkvResponse) && !stkvResponse.Contains("?"))
+            {
+                Logger.Log.WriteLine($"K-line voltage: {stkvResponse}");
+            }
+            else
+            {
+                Logger.Log.WriteLine("STKV not supported (not an STN chip, or K-line not available)");
+            }
+
+            var stmfcResponse = canInterface.SendCommandWithResponse("STMFC");
+            if (!string.IsNullOrEmpty(stmfcResponse) && !stmfcResponse.Contains("?"))
+            {
+                Logger.Log.WriteLine($"STN monitor filter count: {stmfcResponse}");
+            }
+
+            // Check adapter voltage (battery via OBD)
+            var atrv = canInterface.SendCommandWithResponse("ATRV");
+            if (!string.IsNullOrEmpty(atrv))
+            {
+                Logger.Log.WriteLine($"OBD battery voltage: {atrv}");
+            }
+
+            Logger.Log.WriteLine();
+
+            // === Results Summary ===
+            Logger.Log.WriteLine($"=== K-Line Scan Results: {foundModules.Count} module(s) found ===");
+            if (foundModules.Count > 0)
+            {
+                foreach (var (address, name, protocol, response) in foundModules)
+                {
+                    Logger.Log.WriteLine($"  0x{address:X2} {name,-20} [{protocol,-10}] {response}");
+                }
+            }
+            else
+            {
+                Logger.Log.WriteLine("No K-line modules responded.");
+                Logger.Log.WriteLine();
+                Logger.Log.WriteLine("Possible causes:");
+                Logger.Log.WriteLine("  1. Adapter has no K-line transceiver (CAN-only hardware)");
+                Logger.Log.WriteLine("  2. OBD pin 7 (K-line) not connected in this vehicle");
+                Logger.Log.WriteLine("  3. Ignition off — try with ignition ON");
+                Logger.Log.WriteLine("  4. K-line pull-up resistor missing on adapter");
+                Logger.Log.WriteLine();
+                Logger.Log.WriteLine("Test with multimeter: Pin 7 should show ~12V when ignition is ON.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Log.WriteLine($"\nELM K-Line scan failed: {ex.Message}");
+        }
+    }
+
     private static void ShowUsage()
     {
         Logger.Log.WriteLine("""
@@ -1499,6 +1771,8 @@ COMMAND =
         Open a VW TP 2.0 channel and send a KWP2000 TesterPresent request
     CanUds
         Open a VW TP 2.0 channel and test UDS (ISO 14229) services
+    ElmKLine
+        Scan K-line bus via ELM327/STN adapter (ISO 14230-4, ISO 9141-2)
     ClarionVWPremium4SafeCode
     ClearFaultCodes
     DelcoVWPremium5SafeCode

@@ -96,6 +96,7 @@ public partial class MainWindowViewModel : ViewModelBase
         "Can.Diag"          => new CanDiagViewModel(_connectionService),
         "Can.MultiEcu"      => new CanMultiEcuViewModel(_connectionService),
         "Can.Skc"           => new CanSkcViewModel(_connectionService),
+        "Can.Obd2"          => new Obd2ViewModel(_connectionService),
         _ => null,
     };
 
@@ -151,6 +152,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     new NavigationItem { Title = "Diagnostics", Tag = "Can.Diag" },
                     new NavigationItem { Title = "Multi-ECU", Tag = "Can.MultiEcu" },
                     new NavigationItem { Title = "SKC / PIN", Tag = "Can.Skc" },
+                    new NavigationItem { Title = "OBD2 Live Data", Tag = "Can.Obd2" },
                 ]
             }
         ];

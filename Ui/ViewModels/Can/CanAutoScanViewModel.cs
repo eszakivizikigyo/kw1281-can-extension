@@ -34,6 +34,16 @@ public partial class CanAutoScanViewModel : ViewModelBase
     public CanAutoScanViewModel(ConnectionService connectionService)
     {
         _connectionService = connectionService;
+        _connectionService.StateChanged += OnConnectionStateChanged;
+    }
+
+    private void OnConnectionStateChanged(object? sender, EventArgs e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            StartCommand.NotifyCanExecuteChanged();
+            StopCommand.NotifyCanExecuteChanged();
+        });
     }
 
     private bool CanStart() => !IsScanning && _connectionService.State == ConnectionState.Connected
