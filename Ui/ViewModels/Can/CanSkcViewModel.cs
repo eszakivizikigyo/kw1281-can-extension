@@ -17,6 +17,7 @@ public partial class CanSkcViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(GetSkcCommand))]
     [NotifyCanExecuteChangedFor(nameof(ReadClusterInfoCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ScanDidsCommand))]
     private bool _isBusy;
 
     [ObservableProperty]
@@ -27,6 +28,9 @@ public partial class CanSkcViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _skcResult = string.Empty;
+
+    [ObservableProperty]
+    private string _didScanResult = string.Empty;
 
     public CanSkcViewModel(ConnectionService connectionService)
     {
@@ -40,6 +44,7 @@ public partial class CanSkcViewModel : ViewModelBase
         {
             GetSkcCommand.NotifyCanExecuteChanged();
             ReadClusterInfoCommand.NotifyCanExecuteChanged();
+            ScanDidsCommand.NotifyCanExecuteChanged();
         });
     }
 
@@ -120,30 +125,80 @@ public partial class CanSkcViewModel : ViewModelBase
                 using var uds = new UdsCanDialog(transport);
 
                 // Read ECU identification via ReadDataByIdentifier
-                var partNumData = uds.ReadDataByIdentifier(0xF187);
-                var ecuIdent = partNumData.Length > 2
-                    ? Encoding.ASCII.GetString(partNumData, 2, partNumData.Length - 2).TrimEnd('\0')
-                    : "";
-                Logger.Log.WriteLine($"Cluster part number: {ecuIdent}");
+                var ecuIdent = "";
+                try
+                {
+                    var partNumData = uds.ReadDataByIdentifier(0xF187);
+                    Logger.Log.WriteLine(
+                        $"F187 raw ({partNumData.Length} bytes): {BitConverter.ToString(partNumData)}");
+                    ecuIdent = partNumData.Length > 2
+                        ? Encoding.ASCII.GetString(partNumData, 2, partNumData.Length - 2).TrimEnd('\0', ' ')
+                        : Encoding.ASCII.GetString(partNumData).TrimEnd('\0', ' ');
+                    Logger.Log.WriteLine($"Cluster part number: [{ecuIdent}]");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log.WriteLine($"F187 read failed: {ex.Message}");
+                }
 
+                // Validate cluster type if we got a full part number
                 var partNumberGroups = Tester.FindAndParsePartNumber(ecuIdent);
-                if (partNumberGroups.Length < 4)
-                    throw new InvalidOperationException($"Unable to parse part number from: {ecuIdent}");
+                if (partNumberGroups.Length >= 4)
+                {
+                    if (!ecuIdent.Contains("VDO") && partNumberGroups[1] != "920")
+                        throw new InvalidOperationException(
+                            $"CAN GetSKC only supports VDO CAN (920) clusters. Detected: {string.Join(" ", partNumberGroups)}");
+                    Logger.Log.WriteLine("VDO CAN cluster detected.");
+                }
+                else
+                {
+                    Logger.Log.WriteLine($"Part number not fully parsed [{ecuIdent}], proceeding with EEPROM read anyway...");
+                }
 
-                if (!ecuIdent.Contains("VDO") && partNumberGroups[1] != "920")
-                    throw new InvalidOperationException(
-                        $"CAN GetSKC only supports VDO CAN (920) clusters. Detected: {string.Join(" ", partNumberGroups)}");
-
-                Logger.Log.WriteLine("VDO CAN cluster detected. Reading EEPROM via UDS ReadMemoryByAddress...");
+                Logger.Log.WriteLine("Reading EEPROM via UDS ReadMemoryByAddress...");
 
                 // Switch to extended diagnostic session for memory access
                 try
                 {
-                    uds.DiagnosticSessionControl(0x03); // extendedDiagnosticSession
+                    var sessionResp = uds.DiagnosticSessionControl(0x03); // extendedDiagnosticSession
+                    Logger.Log.WriteLine($"Extended session OK ({BitConverter.ToString(sessionResp)})");
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log.WriteLine($"Warning: Extended session start failed: {ex.Message}");
+                    Logger.Log.WriteLine($"Extended session failed: {ex.Message}");
+                    // Try programming session as fallback
+                    try
+                    {
+                        var sessionResp = uds.DiagnosticSessionControl(0x02); // programmingSession
+                        Logger.Log.WriteLine($"Programming session OK ({BitConverter.ToString(sessionResp)})");
+                    }
+                    catch (Exception ex2)
+                    {
+                        Logger.Log.WriteLine($"Programming session also failed: {ex2.Message}");
+                    }
+                }
+
+                // Attempt Security Access with VDO seed/key
+                try
+                {
+                    Logger.Log.WriteLine("Attempting Security Access...");
+                    var seedResp = uds.SecurityAccess(0x01, Array.Empty<byte>());
+                    if (seedResp.Length > 1)
+                    {
+                        var seed = new byte[seedResp.Length - 1];
+                        Array.Copy(seedResp, 1, seed, 0, seed.Length);
+                        Logger.Log.WriteLine($"Seed: {BitConverter.ToString(seed)}");
+
+                        var key = VdoKeyFinder.FindKey(seed, accessLevel: 1);
+                        Logger.Log.WriteLine($"Key: {BitConverter.ToString(key)}");
+
+                        var keyResp = uds.SecurityAccess(0x02, key);
+                        Logger.Log.WriteLine($"Security Access granted! ({BitConverter.ToString(keyResp)})");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log.WriteLine($"Security Access failed: {ex.Message} - proceeding anyway...");
                 }
 
                 // Read EEPROM region containing SKC (0x90 to 0x10C = 0x7C bytes)
@@ -185,6 +240,94 @@ public partial class CanSkcViewModel : ViewModelBase
         {
             StatusText = $"Error: {ex.Message}";
             Logger.Log.WriteLine($"GetSkc failed: {ex.Message}");
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanExecute))]
+    private async Task ScanDidsAsync()
+    {
+        IsBusy = true;
+        DidScanResult = string.Empty;
+        StatusText = "Scanning cluster DIDs...";
+
+        try
+        {
+            var canInterface = _connectionService.CanInterface!;
+
+            var result = await Task.Run(() =>
+            {
+                using var transport = new ElmIsoTpTransport(canInterface, 0x714, 0x77E);
+                if (!transport.Open())
+                    throw new InvalidOperationException("Failed to open ISO-TP transport to cluster (0x714/0x77E)");
+
+                using var uds = new UdsCanDialog(transport);
+                var sb = new StringBuilder();
+                var found = 0;
+
+                // DID ranges to scan:
+                // 0x0100-0x01FF: VW manufacturer-specific
+                // 0x0200-0x02FF: VW manufacturer-specific
+                // 0x0800-0x08FF: VW diagnostic data
+                // 0xF100-0xF1FF: UDS identification
+                // 0xF180-0xF19F: standard identification DIDs
+                ushort[][] ranges =
+                [
+                    [0x0100, 0x01FF],
+                    [0x0200, 0x02FF],
+                    [0x0800, 0x08FF],
+                    [0xF100, 0xF1FF],
+                    [0xF000, 0xF0FF],
+                ];
+
+                foreach (var range in ranges)
+                {
+                    for (ushort did = range[0]; did <= range[1]; did++)
+                    {
+                        try
+                        {
+                            var resp = uds.ReadDataByIdentifier(did);
+                            if (resp.Length > 2)
+                            {
+                                var dataBytes = new byte[resp.Length - 2];
+                                Array.Copy(resp, 2, dataBytes, 0, dataBytes.Length);
+
+                                var hex = BitConverter.ToString(dataBytes).Replace("-", " ");
+                                var ascii = "";
+                                foreach (var b in dataBytes)
+                                    ascii += b is >= 0x20 and <= 0x7E ? (char)b : '.';
+
+                                sb.AppendLine($"DID 0x{did:X4}: [{resp.Length - 2} bytes] {hex}");
+                                sb.AppendLine($"           ASCII: {ascii}");
+                                Logger.Log.WriteLine($"DID 0x{did:X4} ({resp.Length - 2}B): {hex} | {ascii}");
+                                found++;
+                            }
+                        }
+                        catch (NegativeUdsResponseException)
+                        {
+                            // DID not supported, skip
+                        }
+                        catch (InvalidOperationException ex) when (ex.Message.Contains("No response"))
+                        {
+                            // Timeout, skip
+                        }
+                    }
+                }
+
+                sb.Insert(0, $"=== Found {found} supported DIDs ===\n\n");
+                return sb.ToString();
+            });
+
+            DidScanResult = result;
+            StatusText = "DID scan complete.";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Error: {ex.Message}";
+            Logger.Log.WriteLine($"DID scan failed: {ex.Message}");
         }
         finally
         {

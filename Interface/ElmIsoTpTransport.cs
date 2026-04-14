@@ -57,11 +57,21 @@ internal class ElmIsoTpTransport : ICanTransport
             // Ensure CAN auto-formatting is ON (ELM327 handles ISO-TP framing)
             if (!_can.SendCommand("ATCAF1")) return false;
 
+            // Enable CAN flow control (sends FC frames for multi-frame responses)
+            // Must be explicitly re-enabled after raw CAN mode (ATCAF0) may have disabled it
+            if (!_can.SendCommand("ATCFC1")) return false;
+
             // Set TX header (tester → ECU CAN ID)
             if (!_can.SendCommand($"ATSH{_txId:X3}")) return false;
 
             // Set RX filter (ECU → tester CAN ID)
             if (!_can.SendCommand($"ATCRA{_rxId:X3}")) return false;
+
+            // Explicitly configure Flow Control: header = TX ID, data = CTS/BS=0/STmin=0
+            // Required after raw CAN mode — STN1170 may not auto-configure FC correctly
+            if (!_can.SendCommand($"ATFCSH{_txId:X3}")) return false;  // FC frame CAN ID
+            if (!_can.SendCommand("ATFCSD300000")) return false;        // FC: CTS, BS=0, STmin=0
+            if (!_can.SendCommand("ATFCSM1")) return false;             // Use custom FC settings
 
             // Turn off headers so response contains only UDS payload
             if (!_can.SendCommand("ATH0")) return false;
